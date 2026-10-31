@@ -1,0 +1,28 @@
+{
+  "name": "cord-kits-music",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Discord music starter kit: SoundCloud, direct audio, radio streams, and attachments. No YouTube.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "register": "node src/register.js",
+    "lint": "eslint .",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@discordjs/voice": "0.19.2",
+    "ajv": "^8.17.1",
+    "discord.js": "^14.28.0",
+    "libsodium-wrappers": "^0.7.15",
+    "opusscript": "0.0.8"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "eslint": "^9.39.1",
+    "globals": "^15.15.0"
+  }
+}

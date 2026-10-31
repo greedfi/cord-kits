@@ -1,0 +1,28 @@
+{
+  "guilds": {
+    "111111111111111111": {
+      "modLogChannelId": "222222222222222222",
+      "wordFilter": {
+        "enabled": false,
+        "match": "word",
+        "words": ["placeholder"]
+      },
+      "linkFilter": {
+        "enabled": false,
+        "mode": "blocklist",
+        "domains": ["example.com"],
+        "allowSubdomains": true
+      },
+      "raidMode": {
+        "enabled": false,
+        "slowmodeSeconds": 10,
+        "channelIds": ["333333333333333333"],
+        "joinHold": {
+          "type": "timeout",
+          "timeoutMinutes": 10,
+          "roleId": null
+        }
+      }
+    }
+  }
+}

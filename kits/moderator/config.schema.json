@@ -1,0 +1,114 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/greedfi/cord-kits/blob/main/kits/moderator/config.schema.json",
+  "title": "Moderator kit config",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["guilds"],
+  "properties": {
+    "guilds": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[0-9]{17,20}$"
+      },
+      "additionalProperties": {
+        "$ref": "#/definitions/guild"
+      }
+    }
+  },
+  "definitions": {
+    "snowflake": {
+      "type": "string",
+      "pattern": "^[0-9]{17,20}$"
+    },
+    "guild": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["modLogChannelId", "wordFilter", "linkFilter", "raidMode"],
+      "properties": {
+        "modLogChannelId": {
+          "oneOf": [
+            { "$ref": "#/definitions/snowflake" },
+            { "type": "null" }
+          ]
+        },
+        "wordFilter": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "match", "words"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "match": { "enum": ["word", "contains"] },
+            "words": {
+              "type": "array",
+              "maxItems": 500,
+              "items": { "type": "string", "minLength": 1, "maxLength": 80 }
+            }
+          }
+        },
+        "linkFilter": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "mode", "domains", "allowSubdomains"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "mode": { "enum": ["off", "allowlist", "blocklist"] },
+            "allowSubdomains": { "type": "boolean" },
+            "domains": {
+              "type": "array",
+              "maxItems": 500,
+              "items": {
+                "type": "string",
+                "pattern": "^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,63}$"
+              }
+            }
+          }
+        },
+        "raidMode": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "slowmodeSeconds", "channelIds", "joinHold"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "slowmodeSeconds": { "type": "integer", "minimum": 0, "maximum": 21600 },
+            "channelIds": {
+              "type": "array",
+              "uniqueItems": true,
+              "maxItems": 50,
+              "items": { "$ref": "#/definitions/snowflake" }
+            },
+            "joinHold": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["type", "timeoutMinutes", "roleId"],
+              "properties": {
+                "type": { "enum": ["off", "timeout", "role"] },
+                "timeoutMinutes": { "type": "integer", "minimum": 1, "maximum": 40320 },
+                "roleId": {
+                  "oneOf": [
+                    { "$ref": "#/definitions/snowflake" },
+                    { "type": "null" }
+                  ]
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": { "type": { "const": "role" } },
+                    "required": ["type"]
+                  },
+                  "then": {
+                    "properties": {
+                      "roleId": { "$ref": "#/definitions/snowflake" }
+                    },
+                    "required": ["roleId"]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

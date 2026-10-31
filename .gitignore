@@ -1,0 +1,10 @@
+node_modules/
+.env
+.env.*
+!.env.example
+config.json
+data/
+*.log
+npm-debug.log*
+.DS_Store
+*.tmp
