@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/greedfi/cord-kits/blob/main/kits/music/config.schema.json",
+  "title": "Music kit config",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["defaultVolume", "maxQueueSize", "guilds"],
+  "properties": {
+    "defaultVolume": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Playback volume from 0 to 100 when a guild has no override."
+    },
+    "maxQueueSize": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 500,
+      "description": "Maximum number of tracks waiting per guild, not counting the track that is playing."
+    },
+    "guilds": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[0-9]{17,20}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "defaultVolume": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "maxQueueSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "name": "cord-kits-moderator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Discord moderator starter kit: word and link filters, warn, timeout, kick, ban, purge, mod log, and raid mode.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "register": "node src/register.js",
+    "lint": "eslint .",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "discord.js": "^14.28.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "eslint": "^9.39.1",
+    "globals": "^15.15.0"
+  }
+}

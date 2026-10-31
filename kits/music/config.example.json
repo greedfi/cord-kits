@@ -1,0 +1,10 @@
+{
+  "defaultVolume": 50,
+  "maxQueueSize": 100,
+  "guilds": {
+    "111111111111111111": {
+      "defaultVolume": 40,
+      "maxQueueSize": 50
+    }
+  }
+}
