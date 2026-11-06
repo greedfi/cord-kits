@@ -1,6 +1,15 @@
 import { Events, MessageFlags, PermissionFlagsBits } from 'discord.js'
 import { redact } from './env.js'
-import { commitSeen, parseFeed, planFailure, selectNew } from './feed.js'
+import {
+  HISTORY_PAGE,
+  HISTORY_PAGES,
+  commitSeen,
+  entryMarker,
+  parseFeed,
+  planFailure,
+  scanFeedPages,
+  selectNew,
+} from './feed.js'
 import { fetchPublic } from './ssrf.js'
 import { cleanText } from './text.js'
 import { inviteUrl } from './permissions.js'
@@ -52,20 +61,49 @@ export function createRuntime({
     })
   }
 
-  async function postEntry(guildId, channelId, entry) {
+  async function locatePost(channel, marker, botId) {
+    if (!botId || typeof channel.messages?.fetch !== 'function') {
+      throw new Error('Cannot reconcile a feed post without Read Message History.')
+    }
+    const pages = []
+    let before
+    for (let page = 0; page < HISTORY_PAGES; page += 1) {
+      const batch = await channel.messages.fetch({ limit: HISTORY_PAGE, before })
+      const list = [...(batch?.values?.() ?? batch ?? [])].map((message) => ({
+        id: message.id,
+        content: message.content,
+        authorId: message.author?.id ?? message.authorId,
+      }))
+      pages.push(list)
+      const scan = scanFeedPages(pages, { marker, botId })
+      if (scan.found || scan.complete) return scan
+      if (!list.length) return { found: false, complete: true }
+      before = list[list.length - 1].id
+    }
+    return scanFeedPages(pages, { marker, botId })
+  }
+
+  async function postEntry(guildId, channelId, entry, marker) {
     const guild = await guildOf(guildId)
     if (guild.id !== guildId) throw new Error('Refusing to post outside the configured server.')
     const channel = guild.channels.cache?.get(channelId) ?? await guild.channels.fetch(channelId)
     if ((channel.guildId ?? channel.guild?.id) !== guildId) {
       throw new Error('Refusing to post outside the configured server.')
     }
+    const botId = guild.members?.me?.id ?? guild.client?.user?.id
+    const located = await locatePost(channel, marker, botId)
+    if (located.found) return { duplicate: true }
+    if (!located.complete) {
+      throw new Error('Feed history is incomplete, so this entry was not posted again.')
+    }
     const title = cleanText(entry.title || 'Update', 180)
     const link = entry.link ? `\n${entry.link}` : ''
     await channel.send({
-      content: cleanText(`${title}${link}`, 1800),
+      content: `${cleanText(`${title}${link}`, 1700)}\n${marker}`,
       allowedMentions: { parse: [] },
       flags: MessageFlags.SuppressEmbeds,
     })
+    return { duplicate: false }
   }
 
   async function pollOne(guildId, feed, allow) {
@@ -104,7 +142,7 @@ export function createRuntime({
       return
     }
     for (const entry of choice.post) {
-      await postEntry(guildId, feed.channelId, entry)
+      await postEntry(guildId, feed.channelId, entry, entryMarker(key, entry.id))
       await mark(key, (state) => ({
         ...state,
         seeded: true,

@@ -8,7 +8,7 @@ Automated tests mock DNS, HTTP, and Discord. They are not live posts. Use the ch
 
 ## Polling, host, and cost
 
-The process has to stay running. It wakes every 30 seconds and fetches a feed only when that feed's `nextAttemptAt` is due. `pollIntervalSeconds` is at least 120 and defaults to 300 in the example, so a feed is not fetched more often than that after a success. A failure backs off from one minute, doubling until one hour, and the cursor is not moved. The first successful fetch records the current entries and posts nothing, so a new feed does not dump its history. Later polls post at most 5 new entries. The rest stay unseen and go out on later polls.
+The process has to stay running. It wakes every 30 seconds and fetches a feed only when that feed's `nextAttemptAt` is due. `pollIntervalSeconds` is at least 120 and defaults to 300 in the example, so a feed is not fetched more often than that after a success. A failure backs off from one minute, doubling until one hour, and the cursor is not moved. The first successful fetch records the current entries and posts nothing, so a new feed does not dump its history. Later polls post at most 5 new entries. The rest stay unseen and go out on later polls. Each post ends with a short hash of the feed and entry. Before sending, the bot searches the last 500 messages for its own copy of that hash. Discord has no send idempotency key, so this is not exactly-once: a scan that cannot see the whole recent history does not send again, and two replicas that do not share `DATA_DIR` can both post. A failed send does not mark the entry seen.
 
 This is a Gateway process plus outbound HTTP. It is not deployable to Vercel or another host that suspends the process. Railway bills the always-on container and the egress. Nothing here is guaranteed free. Run one replica against one `DATA_DIR`. Two replicas that do not share that directory can post duplicates.
 
@@ -38,11 +38,12 @@ The config schema only accepts `https://` feed URLs. The fetcher still rejects a
 | --- | --- |
 | View Channel | See the destination |
 | Send Messages | Post the entry |
+| Read Message History | Find a post that was sent before its id was saved |
 
-Permission integer: **3072**
+Permission integer: **68608**
 
 ```
-https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot%20applications.commands&permissions=3072
+https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot%20applications.commands&permissions=68608
 ```
 
 Posts use `allowedMentions: { parse: [] }`, strip `@everyone` and `@here`, and suppress embeds. A feed posts only when its `channelId` is in that server's `destinations` list and the fetched channel belongs to that server.

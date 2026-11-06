@@ -19,6 +19,15 @@ describe('level thresholds', () => {
     assert.equal(levelForXp(600), 3)
     assert.equal(levelForXp(505000), 100)
     assert.equal(levelForXp(504999), 99)
+    const capped = decideAward({
+      xp: xpToReach(200),
+      lastAwardAt: 0,
+      now: 10,
+      cooldownMs: 0,
+      amount: 50,
+    })
+    assert.equal(capped.reason, 'cap')
+    assert.equal(capped.xp, xpToReach(200))
   })
 
   test('cooldown blocks a second award at the same timestamp', () => {

@@ -27,11 +27,13 @@ export function messageGate(message, settings) {
 
 export function decideAward({ xp = 0, lastAwardAt = 0, now, cooldownMs, amount }) {
   if (!Number.isInteger(amount) || amount < 1) throw new Error('XP amount must be a positive integer.')
+  const cap = xpToReach(LEVEL_CAP)
+  if (xp >= cap) return { award: false, reason: 'cap', xp, level: levelForXp(xp) }
   if (lastAwardAt && now - lastAwardAt < cooldownMs) {
     return { award: false, reason: 'cooldown', xp, level: levelForXp(xp) }
   }
   const before = levelForXp(xp)
-  const next = xp + amount
+  const next = Math.min(cap, xp + amount)
   const after = levelForXp(next)
   return { award: true, xp: next, lastAwardAt: now, before, after }
 }

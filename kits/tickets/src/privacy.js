@@ -47,6 +47,15 @@ export function transcriptPath(root, guildId, ticketId) {
   return file
 }
 
+export function formatTranscriptLine(message, now = Date.now()) {
+  const text = String(message?.content ?? '').replace(/@(everyone|here)/gi, '@\u200b$1').trim() || '[no content]'
+  const count = Array.isArray(message?.attachments)
+    ? message.attachments.length
+    : (message?.attachments?.size ?? 0)
+  const files = count ? ` [${count} attachment(s) not copied]` : ''
+  return `${new Date(message?.at ?? now).toISOString()} ${message?.authorId ?? 'unknown'}: ${text.slice(0, 500)}${files}`
+}
+
 export function activeTicket(data, guildId, openerId) {
   const guild = data.guilds?.[guildId] ?? {}
   return Object.values(guild).find((ticket) => ticket.openerId === openerId && ticket.status === 'open') ?? null

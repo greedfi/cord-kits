@@ -46,6 +46,7 @@ function harness({ failSend = 0, failFetch = false, canSend = true } = {}) {
   const dir = tempDir()
   const sent = []
   const edits = []
+  const history = []
   let sendFailures = failSend
   const channel = {
     id: CHANNEL,
@@ -64,6 +65,9 @@ function harness({ failSend = 0, failFetch = false, canSend = true } = {}) {
       return message
     },
     messages: {
+      async fetch() {
+        return { values() { return history.slice() } }
+      },
       async edit(id, payload) {
         edits.push({ id, payload })
         return { id }
@@ -116,6 +120,7 @@ function harness({ failSend = 0, failFetch = false, canSend = true } = {}) {
     dir,
     sent,
     edits,
+    history,
     store,
     runtime,
     channel,
@@ -402,6 +407,129 @@ describe('giveaway runtime', () => {
       await box.runtime.handleInteraction(reroll.interaction)
       assert.equal(box.draws(), afterEnd + 1)
       assert.match(reroll.replies.at(-1).content, /Rerolled/)
+    } finally {
+      box.runtime.shutdown()
+      box.dir.remove()
+    }
+  })
+
+  test('a crash after send reuses the existing message instead of posting again', async () => {
+    const box = harness()
+    const original = box.store.update.bind(box.store)
+    let crash = true
+    box.store.update = (mutator) => original(async (data) => {
+      const result = await mutator(data)
+      if (crash) {
+        for (const guild of Object.values(data.guilds ?? {})) {
+          for (const item of Object.values(guild ?? {})) {
+            if (item.messageId) {
+              crash = false
+              throw new Error('crash before persist')
+            }
+          }
+        }
+      }
+      return result
+    })
+    try {
+      const created = command({
+        sub: 'create',
+        channel: box.channel,
+        prize: 'hat',
+        minutes: 5,
+        winners: 1,
+      })
+      await box.runtime.handleInteraction(created.interaction)
+      assert.equal(box.sent.length, 1)
+      assert.match(created.replies.at(-1).content, /post failed/)
+      const saved = await createJsonStore(box.dir.path('giveaways.json')).read()
+      const id = Object.keys(saved.guilds[GUILD])[0]
+      assert.equal(saved.guilds[GUILD][id].messageId, null)
+      box.history.push({
+        id: box.sent[0].message.id,
+        content: box.sent[0].payload.content,
+        author: { id: '999999999999999999' },
+        createdTimestamp: saved.guilds[GUILD][id].createdAt,
+      })
+      const restarted = createRuntime({
+        configStore: config(),
+        store: createJsonStore(box.dir.path('giveaways.json')),
+        now: () => 1_000_000,
+        randomInt: () => { throw new Error('redraw') },
+        fetchGuild: async () => box.guild,
+      })
+      await restarted.tick()
+      restarted.shutdown()
+      assert.equal(box.sent.length, 1)
+      const again = await createJsonStore(box.dir.path('giveaways.json')).read()
+      assert.equal(again.guilds[GUILD][id].messageId, box.sent[0].message.id)
+      assert.equal(again.guilds[GUILD][id].announcePending, false)
+    } finally {
+      box.runtime.shutdown()
+      box.dir.remove()
+    }
+  })
+
+  test('an incomplete history scan does not send a second announcement', async () => {
+    const box = harness()
+    try {
+      const created = command({
+        sub: 'create',
+        channel: box.channel,
+        prize: 'hat',
+        minutes: 5,
+        winners: 1,
+      })
+      await box.runtime.handleInteraction(created.interaction)
+      const saved = await box.store.read()
+      const id = Object.keys(saved.guilds[GUILD])[0]
+      await box.store.update((data) => {
+        data.guilds[GUILD][id].messageId = null
+        data.guilds[GUILD][id].announcePending = true
+      })
+      const page = Array.from({ length: 100 }, (_, index) => ({
+        id: `newer-${index}`,
+        content: 'unrelated',
+        author: { id: '999999999999999999' },
+        createdTimestamp: saved.guilds[GUILD][id].createdAt + 10_000,
+      }))
+      box.history.splice(0, box.history.length, ...page)
+      await assert.rejects(() => box.runtime.settle(GUILD, id), /incomplete/)
+      assert.equal(box.sent.length, 1)
+    } finally {
+      box.runtime.shutdown()
+      box.dir.remove()
+    }
+  })
+
+  test('a timer and an end command share one draw', async () => {
+    const box = harness()
+    try {
+      const created = command({
+        sub: 'create',
+        channel: box.channel,
+        prize: 'hat',
+        minutes: 5,
+        winners: 1,
+      })
+      await box.runtime.handleInteraction(created.interaction)
+      const id = box.sent[0].payload.components[0].toJSON().components[0].custom_id.slice('gw:join:'.length)
+      const join = command({ user: { id: USER, bot: false, createdTimestamp: 0 } })
+      join.interaction.isChatInputCommand = () => false
+      join.interaction.isButton = () => true
+      join.interaction.customId = `gw:join:${id}`
+      await box.runtime.handleInteraction(join.interaction)
+      await box.store.update((data) => {
+        data.guilds[GUILD][id].endAt = 1
+        data.guilds[GUILD][id].announcePending = false
+      })
+      const before = box.draws()
+      await Promise.all([
+        box.runtime.settle(GUILD, id),
+        box.runtime.handleInteraction(command({ sub: 'end', id }).interaction),
+      ])
+      assert.equal(box.draws(), before + 1)
+      assert.equal(box.sent.length, 1)
     } finally {
       box.runtime.shutdown()
       box.dir.remove()

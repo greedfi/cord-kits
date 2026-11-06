@@ -9,7 +9,10 @@ import {
 } from 'discord.js'
 import { redact } from './env.js'
 import {
+  announcementMarker,
   dueIds,
+  HISTORY_PAGE,
+  HISTORY_PAGES,
   insertGiveaway,
   joinGiveaway,
   leaveGiveaway,
@@ -21,6 +24,7 @@ import {
   readGiveaway,
   rememberMessage,
   renderGiveaway,
+  scanAnnouncementPages,
 } from './giveaway.js'
 import { createRateLimiter } from './limits.js'
 import { inviteUrl } from './permissions.js'
@@ -110,7 +114,7 @@ export function createRuntime({
   let bound = null
   let timer = null
   let ticking = false
-  const inflight = new Set()
+  const inflight = new Map()
 
   async function guildOf(guildId) {
     if (fetchGuild) return fetchGuild(guildId)
@@ -146,23 +150,83 @@ export function createRuntime({
     return map
   }
 
+  async function botIdFor(giveaway) {
+    const guild = await guildOf(giveaway.guildId)
+    return guild.members?.me?.id ?? guild.client?.user?.id ?? null
+  }
+
+  async function locateAnnouncement(channel, giveaway, botId) {
+    if (giveaway.messageId) return { found: true, messageId: giveaway.messageId, complete: true }
+    if (!botId || typeof channel.messages?.fetch !== 'function') {
+      throw new Error('Cannot reconcile the giveaway message without Read Message History.')
+    }
+    const pages = []
+    let before
+    for (let page = 0; page < HISTORY_PAGES; page += 1) {
+      const batch = await channel.messages.fetch({ limit: HISTORY_PAGE, before })
+      const list = [...(batch?.values?.() ?? batch ?? [])].map((message) => ({
+        id: message.id,
+        content: message.content,
+        authorId: message.author?.id ?? message.authorId,
+        createdTimestamp: message.createdTimestamp,
+      }))
+      pages.push(list)
+      const scan = scanAnnouncementPages(pages, {
+        id: giveaway.id,
+        botId,
+        createdAt: giveaway.createdAt,
+      })
+      if (scan.found || scan.complete) return scan
+      if (!list.length) return { found: false, complete: true }
+      before = list[list.length - 1].id
+    }
+    return scanAnnouncementPages(pages, {
+      id: giveaway.id,
+      botId,
+      createdAt: giveaway.createdAt,
+    })
+  }
+
+  async function remember(giveaway, messageId) {
+    await store.update((data) => {
+      const live = readGiveaway(data, giveaway.guildId, giveaway.id)
+      if (live) rememberMessage(live, messageId)
+    })
+  }
+
+  async function editAnnouncement(channel, messageId, payload) {
+    if (typeof channel.messages?.edit === 'function') {
+      await channel.messages.edit(messageId, payload)
+      return
+    }
+    const message = await channel.messages.fetch(messageId)
+    await message.edit(payload)
+  }
+
   async function publish(giveaway) {
     const channel = await channelOf(giveaway)
     const payload = payloadFor(giveaway)
+    const botId = await botIdFor(giveaway)
     let messageId = giveaway.messageId
+    let justSent = false
     if (!messageId) {
-      const message = await channel.send(payload)
-      messageId = message.id
-      await store.update((data) => {
-        const live = readGiveaway(data, giveaway.guildId, giveaway.id)
-        if (live) rememberMessage(live, messageId)
-      })
-    } else if (typeof channel.messages?.edit === 'function') {
-      await channel.messages.edit(messageId, payload)
-    } else {
-      const message = await channel.messages.fetch(messageId)
-      await message.edit(payload)
+      const located = await locateAnnouncement(channel, giveaway, botId)
+      if (located.found) {
+        messageId = located.messageId
+        await remember(giveaway, messageId)
+      } else if (!located.complete) {
+        throw new Error('Giveaway history is incomplete, so another message was not sent.')
+      } else {
+        if (!String(payload.content).includes(announcementMarker(giveaway.id))) {
+          throw new Error('Giveaway message is missing its id marker.')
+        }
+        const message = await channel.send(payload)
+        messageId = message.id
+        justSent = true
+        await remember(giveaway, messageId)
+      }
     }
+    if (!justSent) await editAnnouncement(channel, messageId, payload)
     await store.update((data) => {
       const live = readGiveaway(data, giveaway.guildId, giveaway.id)
       if (!live) return
@@ -173,45 +237,49 @@ export function createRuntime({
     })
   }
 
-  async function settle(guildId, id) {
-    const key = `${guildId}:${id}`
-    if (inflight.has(key)) return { action: 'busy' }
-    inflight.add(key)
-    try {
-      const snapshot = await store.read()
-      const current = readGiveaway(snapshot, guildId, id)
-      if (!current) return { action: 'missing' }
-      const time = now()
-      if (current.status === 'open' && current.endAt <= time) {
-        let membersById
-        try {
-          membersById = await loadMembers(current)
-        } catch (error) {
-          log(`Giveaway ${id} was not ended because member lookup failed: ${error.message}`)
-          return { action: 'retry' }
-        }
-        const outcome = await store.update((data) => {
-          const live = readGiveaway(data, guildId, id)
-          if (!live || live.status !== 'open') {
-            return { action: live?.announcePending ? 'announce' : 'none' }
-          }
-          planEnd(live, { now: time, membersById, randomInt })
-          return { action: 'announce' }
-        })
-        if (outcome.action === 'announce') {
-          const fresh = readGiveaway(await store.read(), guildId, id)
-          await publish(fresh)
-        }
-        return outcome
+  async function settleOnce(guildId, id) {
+    const snapshot = await store.read()
+    const current = readGiveaway(snapshot, guildId, id)
+    if (!current) return { action: 'missing' }
+    const time = now()
+    if (current.status === 'open' && current.endAt <= time) {
+      let membersById
+      try {
+        membersById = await loadMembers(current)
+      } catch (error) {
+        log(`Giveaway ${id} was not ended because member lookup failed: ${error.message}`)
+        return { action: 'retry' }
       }
-      if (current.announcePending) {
-        await publish(current)
+      const outcome = await store.update((data) => {
+        const live = readGiveaway(data, guildId, id)
+        if (!live || live.status !== 'open') {
+          return { action: live?.announcePending ? 'announce' : 'none' }
+        }
+        planEnd(live, { now: time, membersById, randomInt })
         return { action: 'announce' }
+      })
+      if (outcome.action === 'announce') {
+        const fresh = readGiveaway(await store.read(), guildId, id)
+        await publish(fresh)
       }
-      return { action: 'none' }
-    } finally {
-      inflight.delete(key)
+      return outcome
     }
+    if (current.announcePending) {
+      await publish(current)
+      return { action: 'announce' }
+    }
+    return { action: 'none' }
+  }
+
+  function settle(guildId, id) {
+    const key = `${guildId}:${id}`
+    const existing = inflight.get(key)
+    if (existing) return existing
+    const run = settleOnce(guildId, id).finally(() => {
+      if (inflight.get(key) === run) inflight.delete(key)
+    })
+    inflight.set(key, run)
+    return run
   }
 
   async function tick() {
@@ -379,6 +447,9 @@ export function createRuntime({
     if (!existing) {
       await ephemeral(interaction, 'This giveaway is no longer active.')
       return
+    }
+    if (!interaction.deferred && !interaction.replied) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral })
     }
     const person = personFrom(interaction)
     const result = await store.update((data) => {

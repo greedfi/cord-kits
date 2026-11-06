@@ -5,6 +5,7 @@ import { PermissionFlagsBits } from 'discord.js'
 import {
   canReadTranscript,
   canViewTicket,
+  formatTranscriptLine,
   ticketOverwrites,
   transcriptPath,
 } from '../src/privacy.js'
@@ -57,5 +58,13 @@ describe('ticket privacy model', () => {
     assert.equal(file, '/data/transcripts/111111111111111111/abc123abc123.txt')
     assert.throws(() => transcriptPath('/data', GUILD, '../secrets'), /Bad ticket/)
     assert.throws(() => transcriptPath('/data', '../etc', 'abc123abc123'), /Bad guild/)
+    const line = formatTranscriptLine({
+      authorId: OPENER,
+      content: 'see this',
+      at: 0,
+      attachments: [{ url: 'https://cdn.discordapp.com/attachments/secret-file' }],
+    })
+    assert.match(line, /1 attachment/)
+    assert.doesNotMatch(line, /cdn\.discordapp\.com|secret-file/)
   })
 })

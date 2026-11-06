@@ -22,13 +22,16 @@ describe('feed runtime', () => {
     let body = xml(['a'])
     let fetches = 0
     let time = 1_000
+    const history = []
     const channel = {
       id: CHANNEL,
       guildId: GUILD,
       async send(payload) { sent.push(payload) },
+      messages: { async fetch() { return { values() { return history.slice() } } } },
     }
     const guild = {
       id: GUILD,
+      members: { me: { id: '999999999999999999' } },
       channels: { cache: new Map([[CHANNEL, channel]]), async fetch() { return channel } },
     }
     const store = createJsonStore(dir.path('feeds.json'))
@@ -135,6 +138,80 @@ describe('feed runtime', () => {
       assert.match(replies[0], /news:/)
       assert.doesNotMatch(replies[0], /example.com|secret|token/)
     } finally {
+      dir.remove()
+    }
+  })
+
+  test('a crash after a feed send does not post that entry again', async () => {
+    const dir = tempDir()
+    const sent = []
+    const history = []
+    const channel = {
+      id: CHANNEL,
+      guildId: GUILD,
+      async send(payload) { sent.push(payload) },
+      messages: { async fetch() { return { values() { return history.slice() } } } },
+    }
+    const guild = {
+      id: GUILD,
+      members: { me: { id: '999999999999999999' } },
+      channels: { cache: new Map([[CHANNEL, channel]]), async fetch() { return channel } },
+    }
+    const real = createJsonStore(dir.path('feeds.json'))
+    let crash = false
+    const store = {
+      read: () => real.read(),
+      update: (mutator) => real.update(async (data) => {
+        const before = JSON.stringify(data.feeds ?? {})
+        const result = await mutator(data)
+        const after = JSON.stringify(data.feeds ?? {})
+        if (crash && before !== after && after.includes('"b"')) {
+          crash = false
+          throw new Error('crash before persist')
+        }
+        return result
+      }),
+    }
+    let time = 1_000
+    let ids = ['a']
+    const body = () => xml(ids)
+    const runtime = createRuntime({
+      configStore: {
+        get: () => ({
+          pollIntervalSeconds: 300,
+          guilds: {
+            [GUILD]: {
+              destinations: [CHANNEL],
+              feeds: [{ id: 'news', url: 'https://example.com/feed.xml', channelId: CHANNEL }],
+            },
+          },
+        }),
+        onReload() { return () => {} },
+      },
+      store,
+      now: () => time,
+      fetchGuild: async () => guild,
+      fetchFeed: async () => body(),
+    })
+    try {
+      await runtime.tick()
+      time += 300_000
+      ids = ['a', 'b']
+      crash = true
+      await runtime.tick()
+      assert.equal(sent.length, 1)
+      history.push({
+        id: 'posted-1',
+        content: sent[0].content,
+        author: { id: '999999999999999999' },
+      })
+      time += 300_000
+      await runtime.tick()
+      assert.equal(sent.length, 1)
+      const saved = await createJsonStore(dir.path('feeds.json')).read()
+      assert.ok(saved.feeds[`${GUILD}:news`].seen.includes('b'))
+    } finally {
+      runtime.shutdown()
       dir.remove()
     }
   })

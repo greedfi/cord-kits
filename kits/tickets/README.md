@@ -8,7 +8,7 @@ Automated tests mock Discord and check the overwrite list this kit sends. They d
 
 ## Why a channel, and what that does not mean
 
-A private thread is visible to anyone with Manage Threads on the parent channel, and it archives on its own. This kit creates a normal text channel instead and writes overwrites:
+A private thread is visible to anyone with Manage Threads on the parent channel, and it archives on its own. This kit creates a normal text channel instead. If a category is set, the channel is created there and then edited with `lockPermissions: false` and the ticket overwrites, so a category allow is not left in place. Changing `staffRoleId` rewrites overwrites on open tickets. A role with only a guild-level View Channel permission is still denied by the `@everyone` deny. That model is what the tests check. A live server can still differ, especially for Administrator.
 
 | Who | View channel |
 | --- | --- |

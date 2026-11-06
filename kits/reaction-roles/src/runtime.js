@@ -279,6 +279,9 @@ export function createRuntime({
       await ephemeral(interaction, 'This panel is no longer active.')
       return
     }
+    if (!interaction.deferred && !interaction.replied) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral })
+    }
     let result
     try {
       result = await store.update(async (data) => {

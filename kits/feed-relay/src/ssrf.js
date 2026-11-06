@@ -155,6 +155,13 @@ function lookupFrom(resolve) {
 function defaultRequest(url, { lookup, timeoutMs, maxBytes }) {
   const lib = url.protocol === 'https:' ? https : http
   return new Promise((resolve, reject) => {
+    let settled = false
+    const finish = (error, value) => {
+      if (settled) return
+      settled = true
+      if (error) reject(error)
+      else resolve(value)
+    }
     const req = lib.request(url, {
       method: 'GET',
       headers: {
@@ -165,28 +172,37 @@ function defaultRequest(url, { lookup, timeoutMs, maxBytes }) {
       timeout: timeoutMs,
       agent: false,
     }, (res) => {
+      const encoding = String(res.headers['content-encoding'] ?? '').trim().toLowerCase()
+      if (encoding && encoding !== 'identity') {
+        res.destroy()
+        finish(new SsrfError('Compressed feeds are not accepted.'))
+        return
+      }
       const chunks = []
       let size = 0
       res.on('data', (chunk) => {
         size += chunk.length
         if (size > maxBytes) {
           res.destroy()
-          req.destroy(new SsrfError('Feed is too large.'))
+          finish(new SsrfError('Feed is too large.'))
           return
         }
         chunks.push(chunk)
       })
       res.on('end', () => {
-        resolve({
+        finish(null, {
           status: res.statusCode ?? 0,
           headers: res.headers,
           body: Buffer.concat(chunks).toString('utf8'),
         })
       })
-      res.on('error', reject)
+      res.on('error', (error) => finish(error))
     })
-    req.on('timeout', () => req.destroy(new SsrfError('Feed request timed out.')))
-    req.on('error', reject)
+    req.on('timeout', () => {
+      req.destroy()
+      finish(new SsrfError('Feed request timed out.'))
+    })
+    req.on('error', (error) => finish(error))
     req.end()
   })
 }
@@ -207,6 +223,8 @@ export async function fetchPublic(raw, {
   await assertResolved(url.hostname, resolve)
   const lookup = lookupFrom(resolve)
   const response = await request(url, { lookup, timeoutMs, maxBytes })
+  const encoding = String(response.headers?.['content-encoding'] ?? response.headers?.['Content-Encoding'] ?? '').trim().toLowerCase()
+  if (encoding && encoding !== 'identity') throw new SsrfError('Compressed feeds are not accepted.')
   const body = String(response.body ?? '')
   if (Buffer.byteLength(body) > maxBytes) throw new SsrfError('Feed is too large.')
   const status = response.status

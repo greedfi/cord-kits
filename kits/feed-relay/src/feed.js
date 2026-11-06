@@ -1,3 +1,28 @@
+import { createHash } from 'node:crypto'
+
+export const HISTORY_PAGE = 100
+export const HISTORY_PAGES = 5
+
+export function entryMarker(feedKey, entryId) {
+  const hash = createHash('sha256').update(`${feedKey}\n${entryId}`).digest('hex').slice(0, 16)
+  return `\u200bref:${hash}`
+}
+
+export function scanFeedPages(pages, { marker, botId }) {
+  const list = Array.isArray(pages) ? pages : []
+  for (const page of list) {
+    if (!Array.isArray(page)) return { found: false, complete: false }
+    for (const message of page) {
+      if (message?.authorId === botId && String(message.content ?? '').includes(marker) && message.id) {
+        return { found: true, messageId: String(message.id), complete: true }
+      }
+    }
+    if (page.length < HISTORY_PAGE) return { found: false, complete: true }
+  }
+  if (list.length === 0) return { found: false, complete: true }
+  return { found: false, complete: false }
+}
+
 export function decodeXml(value) {
   return String(value ?? '')
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')

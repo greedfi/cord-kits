@@ -11,7 +11,10 @@ const root = fileURLToPath(new URL('..', import.meta.url))
 
 describe('feed packaging', () => {
   test('invite, intents, and storage match the documented runtime', () => {
-    assert.equal(BOT_PERMISSIONS, PermissionFlagsBits.ViewChannel | PermissionFlagsBits.SendMessages)
+    assert.equal(
+      BOT_PERMISSIONS,
+      PermissionFlagsBits.ViewChannel | PermissionFlagsBits.SendMessages | PermissionFlagsBits.ReadMessageHistory,
+    )
     assert.equal((BOT_PERMISSIONS & PermissionFlagsBits.Administrator) === 0n, true)
     const readme = readFileSync(path.join(root, 'README.md'), 'utf8')
     assert.ok(readme.includes(inviteUrl('<CLIENT_ID>')))

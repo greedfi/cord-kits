@@ -111,5 +111,9 @@ describe('feed address policy', () => {
       },
     }), SsrfError)
     assert.ok(lookedUp >= 2)
+    await assert.rejects(() => fetchPublic('https://example.com/feed', {
+      resolve: async () => [{ address: '1.1.1.1', family: 4 }],
+      request: async () => ({ status: 200, headers: { 'content-encoding': 'gzip' }, body: 'not-xml' }),
+    }), /Compressed/)
   })
 })

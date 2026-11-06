@@ -1,6 +1,6 @@
 import { PermissionFlagsBits } from 'discord.js'
 
-export const BOT_PERMISSION_NAMES = ['ViewChannel', 'SendMessages']
+export const BOT_PERMISSION_NAMES = ['ViewChannel', 'SendMessages', 'ReadMessageHistory']
 
 export const BOT_PERMISSIONS = BOT_PERMISSION_NAMES.reduce(
   (sum, name) => sum | PermissionFlagsBits[name],

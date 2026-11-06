@@ -9,6 +9,7 @@ import {
   planCancel,
   planEnd,
   planReroll,
+  scanAnnouncementPages,
 } from '../src/giveaway.js'
 
 function openGiveaway(entries) {
@@ -25,6 +26,39 @@ function openGiveaway(entries) {
     endedAt: null,
   }
 }
+
+describe('giveaway announcement scan', () => {
+  test('adopts the bot message with the marker and refuses a short history', () => {
+    const hit = scanAnnouncementPages([[{
+      id: 'm1',
+      authorId: 'bot',
+      content: 'hello\n\u200bgw:abc123abc123',
+      createdTimestamp: 50,
+    }]], { id: 'abc123abc123', botId: 'bot', createdAt: 10 })
+    assert.equal(hit.found, true)
+    assert.equal(hit.messageId, 'm1')
+    const ignored = scanAnnouncementPages([[{
+      id: 'm2',
+      authorId: 'user',
+      content: '\u200bgw:abc123abc123',
+      createdTimestamp: 50,
+    }]], { id: 'abc123abc123', botId: 'bot', createdAt: 10 })
+    assert.equal(ignored.found, false)
+    assert.equal(ignored.complete, true)
+    const full = Array.from({ length: 100 }, (_, index) => ({
+      id: `p${index}`,
+      authorId: 'bot',
+      content: 'other',
+      createdTimestamp: 500,
+    }))
+    const incomplete = scanAnnouncementPages([full, full, full, full, full], {
+      id: 'abc123abc123',
+      botId: 'bot',
+      createdAt: 10,
+    })
+    assert.equal(incomplete.complete, false)
+  })
+})
 
 describe('giveaway rules', () => {
   test('CSPRNG selection is unique, in range, and rejects a bad index', () => {

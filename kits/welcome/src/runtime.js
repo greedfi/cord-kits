@@ -8,6 +8,7 @@ import {
   PermissionFlagsBits,
 } from 'discord.js'
 import { redact } from './env.js'
+import { createRateLimiter } from './limits.js'
 import { inviteUrl } from './permissions.js'
 import { joinDecision, renderTemplate, roleBlock } from './roles.js'
 import { cleanText } from './text.js'
@@ -33,6 +34,7 @@ export function createRuntime({
   store,
   now = () => Date.now(),
   log = (message) => console.error(redact(message)),
+  acceptLimiter = createRateLimiter({ limit: 3, windowMs: 10_000 }),
 }) {
   async function channel(guild, id) {
     if (!id) return null
@@ -117,6 +119,10 @@ export function createRuntime({
   }
 
   async function accept(interaction) {
+    if (!acceptLimiter.take(`${interaction.guild.id}:${interaction.user.id}`).allowed) {
+      await ephemeral(interaction, 'You are pressing that too quickly. This is not an identity check.')
+      return
+    }
     if (interaction.member?.pending) {
       await ephemeral(interaction, 'Finish Discord membership screening first. This button does not bypass it, and it is not an identity check.')
       return
@@ -167,6 +173,10 @@ export function createRuntime({
           return
         }
         await accept(interaction)
+        return
+      }
+      if (interaction.isButton?.() && String(interaction.customId ?? '').startsWith('welcome:')) {
+        await ephemeral(interaction, 'That rules button is out of date. This is not an identity check.')
       }
     } catch (error) {
       log(redact(error instanceof Error ? error.message : error))

@@ -43,7 +43,7 @@ https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot%20applicati
 
 At draw time the bot loads each entrant. People who left, bots, accounts younger than the giveaway's minimum age, and people missing `required_role` are not eligible. If the member lookup fails for any other reason, the draw does not happen and the giveaway stays open. Cancel sets no winners. Reroll draws from entrants who did not win. The same interaction id returns the same reroll instead of drawing again.
 
-Winners are written to disk before the message is edited. A repeat of that edit shows the same winners. If the post itself fails, it is retried. A crash in the gap after Discord accepts a new message and before its id is saved can leave a duplicate message. The draw is not repeated.
+Winners are written to disk before the message is edited. A repeat of that edit shows the same winners. If the post itself fails, it is retried. Discord has no idempotency key for channel messages, so this is not exactly-once delivery. Each message ends with a stable `gw:<id>` marker. Before sending, the bot reads up to 500 recent messages. If it finds its own marker, it saves that id and edits the message. If the history read fails, or 500 newer messages still do not reach the giveaway's creation time, it does not send another copy and leaves the announcement pending. A deleted message plus a complete scan is posted once more. Two replicas that do not share the data directory can still both send. Run one replica. The draw itself is not repeated.
 
 ## Setup
 

@@ -15,6 +15,7 @@ import { inviteUrl } from './permissions.js'
 import {
   activeTicket,
   canReadTranscript,
+  formatTranscriptLine,
   ticketOverwrites,
   transcriptPath,
 } from './privacy.js'
@@ -105,6 +106,18 @@ export function createRuntime({
         reason: `Ticket ${id} opened by ${interaction.user.id}`,
       })
       created = channel
+      if (settings.categoryId && typeof channel.edit === 'function') {
+        await channel.edit({
+          permissionOverwrites: ticketOverwrites({
+            everyoneId: guild.id,
+            openerId: interaction.user.id,
+            staffRoleId: settings.staffRoleId,
+            botId: me.id,
+          }),
+          lockPermissions: false,
+          reason: `Keep ticket ${id} unsynced from its category`,
+        })
+      }
       if (!data.guilds) data.guilds = {}
       if (!data.guilds[guild.id]) data.guilds[guild.id] = {}
       data.guilds[guild.id][id] = {
@@ -188,17 +201,29 @@ export function createRuntime({
       return
     }
     const guild = await guildOf(interaction.guild.id)
-    const channel = guild.channels.cache?.get(snapshot.channelId) ?? await guild.channels.fetch(snapshot.channelId)
+    let channel
+    try {
+      channel = guild.channels.cache?.get(snapshot.channelId) ?? await guild.channels.fetch(snapshot.channelId)
+    } catch (error) {
+      if (error?.code !== 10003) throw error
+      await store.update((draft) => {
+        const live = draft.guilds?.[interaction.guild.id]?.[ticketId]
+        if (live?.status === 'open') {
+          live.status = 'closed'
+          live.closedAt = now()
+          live.pendingCloseBy = null
+        }
+      })
+      await ephemeral(interaction, `Ticket \`${ticketId}\` was already removed in Discord.`)
+      return
+    }
     if (settings?.transcripts) {
       if (!staff) {
         await ephemeral(interaction, 'Transcripts are on. A staff member has to confirm the close.')
         return
       }
       const messages = await (readMessages ?? defaultRead)(channel)
-      const lines = messages.map((message) => {
-        const text = cleanText(message.content || '[no content]', 500)
-        return `${new Date(message.at ?? now()).toISOString()} ${message.authorId}: ${text}`
-      })
+      const lines = messages.map((message) => formatTranscriptLine(message, now))
       const file = transcriptPath(dataPathsRoot(), interaction.guild.id, ticketId)
       fsImpl.mkdirSync(path.dirname(file), { recursive: true })
       fsImpl.writeFileSync(file, `${lines.join('\n')}\n`, { mode: 0o600 })
@@ -303,6 +328,10 @@ export function createRuntime({
           }
         })
         await ephemeral(interaction, 'Close cancelled.')
+        return
+      }
+      if (String(interaction.customId ?? '').startsWith('ticket:')) {
+        await ephemeral(interaction, 'That ticket button is out of date.')
       }
     } catch (error) {
       log(redact(error instanceof Error ? error.message : error))
@@ -310,8 +339,40 @@ export function createRuntime({
     }
   }
 
+  async function resyncOpenTickets() {
+    const data = await store.read()
+    for (const [guildId, tickets] of Object.entries(data.guilds ?? {})) {
+      const settings = settingsFor(guildId)
+      if (!settings?.staffRoleId) continue
+      for (const ticket of Object.values(tickets)) {
+        if (ticket.status !== 'open') continue
+        try {
+          const guild = await guildOf(guildId)
+          const me = guild.members.me ?? await guild.members.fetchMe()
+          const channel = guild.channels.cache?.get(ticket.channelId) ?? await guild.channels.fetch(ticket.channelId)
+          const overwrites = ticketOverwrites({
+            everyoneId: guild.id,
+            openerId: ticket.openerId,
+            staffRoleId: settings.staffRoleId,
+            botId: me.id,
+          })
+          if (typeof channel.edit === 'function') {
+            await channel.edit({
+              permissionOverwrites: overwrites,
+              lockPermissions: false,
+              reason: `Refresh access for ticket ${ticket.id}`,
+            })
+          }
+        } catch (error) {
+          log(`Ticket ${ticket.id} permissions were not refreshed: ${error.message}`)
+        }
+      }
+    }
+  }
+
   return {
     handleInteraction,
+    resyncOpenTickets,
     bind(client) {
       bound = client
       client.on(Events.InteractionCreate, (interaction) => {
@@ -321,7 +382,13 @@ export function createRuntime({
         console.log(`Logged in as ${ready.user?.tag ?? 'bot'}`)
         const clientId = process.env.CLIENT_ID?.trim()
         if (clientId) console.log(`Invite: ${inviteUrl(clientId)}`)
+        resyncOpenTickets().catch((error) => log(redact(error.message ?? error)))
       })
+      if (typeof configStore.onReload === 'function') {
+        configStore.onReload(() => {
+          resyncOpenTickets().catch((error) => log(redact(error.message ?? error)))
+        })
+      }
     },
     shutdown() {},
   }

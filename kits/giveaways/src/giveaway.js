@@ -155,6 +155,36 @@ export function dueIds(data, now) {
   return due
 }
 
+export const HISTORY_PAGE = 100
+export const HISTORY_PAGES = 5
+
+export function announcementMarker(id) {
+  return `\u200bgw:${id}`
+}
+
+export function scanAnnouncementPages(pages, { id, botId, createdAt }) {
+  const marker = announcementMarker(id)
+  let oldest = null
+  const list = Array.isArray(pages) ? pages : []
+  for (let index = 0; index < list.length; index += 1) {
+    const page = list[index]
+    if (!Array.isArray(page)) return { found: false, complete: false }
+    for (const message of page) {
+      const content = String(message?.content ?? '')
+      if (message?.authorId === botId && content.includes(marker) && message.id) {
+        return { found: true, messageId: String(message.id), complete: true }
+      }
+      if (typeof message?.createdTimestamp === 'number') {
+        oldest = oldest == null ? message.createdTimestamp : Math.min(oldest, message.createdTimestamp)
+      }
+    }
+    if (page.length < HISTORY_PAGE) return { found: false, complete: true }
+  }
+  if (list.length === 0) return { found: false, complete: true }
+  const reachedCreation = typeof createdAt === 'number' && oldest != null && oldest <= createdAt
+  return { found: false, complete: reachedCreation }
+}
+
 export function renderGiveaway(giveaway) {
   const prize = cleanText(giveaway.prize, 180)
   const lines = [
@@ -174,7 +204,7 @@ export function renderGiveaway(giveaway) {
   } else {
     lines.push('Press Join to enter or Leave to withdraw.')
   }
-  return lines.join('\n').slice(0, 1900)
+  return `${lines.join('\n').slice(0, 1800)}\n${announcementMarker(giveaway.id)}`
 }
 
 export function mentionPayload(giveaway) {

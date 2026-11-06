@@ -73,12 +73,12 @@ Button and select panels only. This is not an emoji reaction role. The bot refus
 
 Intents: `Guilds`. It is not privileged.
 
-Permissions: View Channel, Send Messages.
+Permissions: View Channel, Send Messages, Read Message History.
 
-Permission integer: **3072**
+Permission integer: **68608**
 
 ```
-https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot%20applications.commands&permissions=3072
+https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot%20applications.commands&permissions=68608
 ```
 
 RSS and Atom only, including a YouTube channel's public Atom URL. No X credential and no YouTube API key. Feed URLs and redirects are checked for SSRF, including private, link-local, mapped IPv6, and a second DNS lookup at connect time. The process has to stay running. See [kits/feed-relay](kits/feed-relay).
