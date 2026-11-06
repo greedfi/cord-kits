@@ -1,0 +1,10 @@
+{
+  "guilds": {
+    "111111111111111111": {
+      "staffRoleId": "222222222222222222",
+      "categoryId": null,
+      "oneActive": true,
+      "transcripts": false
+    }
+  }
+}

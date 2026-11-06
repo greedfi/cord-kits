@@ -30,6 +30,70 @@ export function planSlowmodeSync(state, desired, readCurrent) {
   return { state: next, changes }
 }
 
+export function stateBeforeUncertainApply(prior, preview) {
+  const next = new Map()
+  for (const [id, entry] of prior) {
+    next.set(id, { previous: entry.previous, applied: entry.applied })
+  }
+  for (const [id, entry] of preview.state) {
+    const existing = prior.get(id)
+    if (existing) {
+      next.set(id, { previous: existing.previous, applied: existing.applied })
+    } else {
+      next.set(id, { previous: entry.previous, applied: entry.previous })
+    }
+  }
+  return next
+}
+
+export function stateAfterApply(previous, preview, failedIds) {
+  const failed = failedIds instanceof Set ? failedIds : new Set(failedIds)
+  const next = new Map()
+  for (const [id, entry] of preview.state) {
+    if (failed.has(id)) {
+      const prior = previous.get(id)
+      if (prior) next.set(id, { previous: prior.previous, applied: prior.applied })
+      continue
+    }
+    next.set(id, { previous: entry.previous, applied: entry.applied })
+  }
+  for (const [id, entry] of previous) {
+    if (preview.state.has(id)) continue
+    if (failed.has(id)) next.set(id, { previous: entry.previous, applied: entry.applied })
+  }
+  return next
+}
+
+export async function applyRaidChanges({ prior, preview, setSlowmode }) {
+  const failed = []
+  for (const change of preview.changes) {
+    let ok = false
+    try {
+      ok = await setSlowmode(change.id, change.slowmodeSeconds)
+    } catch {
+      ok = false
+    }
+    if (ok !== true) failed.push(change.id)
+  }
+  return { state: stateAfterApply(prior, preview, failed), failed }
+}
+
+export function describeJoinHold(joinHold) {
+  if (!joinHold || joinHold.type === 'off') {
+    return 'Join hold is off. Raid mode does not time out or assign a role.'
+  }
+  if (joinHold.type === 'timeout') {
+    return `New joins are timed out for ${joinHold.timeoutMinutes} minute(s) only when the bot has Moderate Members and Discord reports that member as moderatable.`
+  }
+  if (joinHold.type === 'role' && joinHold.roleId) {
+    return `New joins are assigned <@&${joinHold.roleId}> only when the bot has Manage Roles, its highest role is above that role, and the role is not managed, @everyone, or elevated. Raid mode does not edit channel overwrites. The role blocks access only where that role already denies it.`
+  }
+  if (joinHold.type === 'role') {
+    return 'Join hold is set to a role, but roleId is missing, so no role is assigned.'
+  }
+  return 'Join hold is off.'
+}
+
 export function joinHoldAction(raidMode) {
   if (!raidMode?.enabled) return { type: 'off' }
   const hold = raidMode.joinHold ?? {}
@@ -87,6 +151,14 @@ export function createRaidSync({ filePath, fsImpl = fs } = {}) {
   }
 
   return {
+    preview(guildId, desired, readCurrent) {
+      return planSlowmodeSync(states.get(guildId) ?? new Map(), desired, readCurrent)
+    },
+    commit(guildId, nextState) {
+      const map = nextState instanceof Map ? nextState : new Map()
+      states.set(guildId, map)
+      persist()
+    },
     plan(guildId, desired, readCurrent) {
       const result = planSlowmodeSync(states.get(guildId) ?? new Map(), desired, readCurrent)
       states.set(guildId, result.state)

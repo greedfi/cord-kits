@@ -1,0 +1,12 @@
+{
+  "guilds": {
+    "111111111111111111": {
+      "welcomeChannelId": "222222222222222222",
+      "leaveChannelId": "333333333333333333",
+      "welcomeMessage": "Welcome {user} to {guild}. You are member {memberCount}.",
+      "leaveMessage": "{user} left {guild}.",
+      "autoRoleId": null,
+      "rulesRoleId": null
+    }
+  }
+}

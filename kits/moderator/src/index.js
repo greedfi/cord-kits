@@ -7,12 +7,21 @@ import {
   GatewayIntentBits,
   PermissionFlagsBits,
 } from 'discord.js'
+import { handleAutomod } from './automod.js'
 import { configFilePath, createConfigStore, createLogger, loadSchema } from './config.js'
 import { execute } from './dispatch.js'
 import { isDirectRun, loadEnv, redact, requireEnv } from './env.js'
-import { messageViolation } from './filters.js'
+import { assessJoinHoldRole, assessJoinHoldTimeout } from './guard.js'
+import { createRateLimiter } from './limits.js'
+import { dataDirectory } from './paths.js'
 import { inviteUrl } from './permissions.js'
-import { createRaidSync, desiredSlowmodes, joinHoldAction } from './raid.js'
+import {
+  applyRaidChanges,
+  createRaidSync,
+  desiredSlowmodes,
+  joinHoldAction,
+  stateBeforeUncertainApply,
+} from './raid.js'
 import { cleanText } from './text.js'
 import { createWarningStore } from './warnings.js'
 
@@ -34,11 +43,15 @@ async function setSlowmode(guild, channelId, seconds) {
     ?? await guild.channels.fetch(channelId).catch(() => null)
   if (!channel || typeof channel.setRateLimitPerUser !== 'function') {
     console.error(`Raid mode: channel ${channelId} does not support slowmode.`)
-    return
+    return false
   }
-  await channel.setRateLimitPerUser(seconds, 'Raid mode').catch((error) => {
+  try {
+    await channel.setRateLimitPerUser(seconds, 'Raid mode')
+    return true
+  } catch (error) {
     console.error(`Raid mode slowmode failed for ${channelId}: ${error.message}`)
-  })
+    return false
+  }
 }
 
 export async function main() {
@@ -53,8 +66,11 @@ export async function main() {
     schema: loadSchema(path.join(kitRoot, 'config.schema.json')),
     logger: createLogger(),
   })
-  const warnings = createWarningStore(path.join(process.cwd(), 'data', 'warnings.json'))
-  const raid = createRaidSync({ filePath: path.join(process.cwd(), 'data', 'raid-snapshots.json') })
+  const dataDir = dataDirectory()
+  const warnings = createWarningStore(path.join(dataDir, 'warnings.json'))
+  const raid = createRaidSync({ filePath: path.join(dataDir, 'raid-snapshots.json') })
+  const filterLimiter = createRateLimiter({ limit: 6, windowMs: 10_000 })
+  const commandLimiter = createRateLimiter({ limit: 5, windowMs: 15_000 })
   let ready = false
 
   const client = new Client({
@@ -76,10 +92,16 @@ export async function main() {
       const channel = guild.channels.cache.get(id) ?? await guild.channels.fetch(id).catch(() => null)
       previous.set(id, typeof channel?.rateLimitPerUser === 'number' ? channel.rateLimitPerUser : 0)
     }
-    const result = raid.plan(guild.id, desired, (id) => previous.get(id) ?? 0)
-    for (const change of result.changes) {
-      await setSlowmode(guild, change.id, change.slowmodeSeconds)
-    }
+    const prior = new Map([...known].map(([id, entry]) => [id, { ...entry }]))
+    const preview = raid.preview(guild.id, desired, (id) => previous.get(id) ?? 0)
+    const prepared = stateBeforeUncertainApply(prior, preview)
+    raid.commit(guild.id, prepared)
+    const applied = await applyRaidChanges({
+      prior: prepared,
+      preview,
+      setSlowmode: (id, seconds) => setSlowmode(guild, id, seconds),
+    })
+    raid.commit(guild.id, applied.state)
   }
 
   async function syncAll() {
@@ -98,24 +120,13 @@ export async function main() {
   }
 
   client.on(Events.MessageCreate, (message) => {
-    if (!message.guild || message.author.bot || !message.content) return
-    const settings = config.get().guilds?.[message.guild.id]
-    const hit = messageViolation(message.content, settings)
-    if (!hit) return
-    ;(async () => {
-      if (message.deletable) {
-        await message.delete().catch((error) => {
-          console.error(`Filter delete failed: ${error.message}`)
-        })
-      } else {
-        console.error('Missing Manage Messages; a filtered message was left in place.')
-      }
-      await sendLog(
-        message.guild,
-        settings,
-        `filter: deleted a message from ${message.author.tag} (${message.author.id}) in <#${message.channel.id}> (${hit.type}: ${hit.detail}).`,
-      )
-    })().catch((error) => console.error(redact(error)))
+    const settings = message.guild ? config.get().guilds?.[message.guild.id] : null
+    handleAutomod(message, {
+      settings,
+      limiter: filterLimiter,
+      fetchMember: (userId) => message.guild.members.fetch(userId).catch(() => null),
+      log: (text) => sendLog(message.guild, settings, text),
+    }).catch((error) => console.error(redact(error)))
   })
 
   client.on(Events.GuildMemberAdd, (member) => {
@@ -130,8 +141,15 @@ export async function main() {
         return
       }
       if (action.type === 'timeout') {
-        if (!me.permissions.has(PermissionFlagsBits.ModerateMembers)) {
-          console.error('Raid join hold needs Moderate Members.')
+        const assessment = assessJoinHoldTimeout({
+          botHasModerate: me.permissions.has(PermissionFlagsBits.ModerateMembers),
+          member,
+          botId: me.id,
+          ownerId: member.guild.ownerId,
+          botHighest: me.roles.highest.position,
+        })
+        if (!assessment.ok) {
+          console.error(`Raid join hold did not time out ${member.id}: ${assessment.reason}.`)
           return
         }
         await member.timeout(action.timeoutMs, 'Raid mode join hold')
@@ -139,17 +157,14 @@ export async function main() {
         return
       }
       if (action.type === 'role') {
-        if (!me.permissions.has(PermissionFlagsBits.ManageRoles)) {
-          console.error('Raid join hold needs Manage Roles.')
-          return
-        }
         const role = await member.guild.roles.fetch(action.roleId).catch(() => null)
-        if (!role) {
-          console.error(`Raid role ${action.roleId} was not found.`)
-          return
-        }
-        if (role.position >= me.roles.highest.position) {
-          console.error(`Move the bot role above ${role.id} before raid mode can assign it.`)
+        const assessment = assessJoinHoldRole(role, {
+          botHasManageRoles: me.permissions.has(PermissionFlagsBits.ManageRoles),
+          botHighest: me.roles.highest.position,
+          guildId: member.guild.id,
+        })
+        if (!assessment.ok) {
+          console.error(`Raid join hold did not assign ${action.roleId}: ${assessment.reason}.`)
           return
         }
         await member.roles.add(role, 'Raid mode join hold')
@@ -159,7 +174,7 @@ export async function main() {
   })
 
   client.on(Events.InteractionCreate, (interaction) => {
-    execute(interaction, { configStore: config, warnings }).catch((error) => {
+    execute(interaction, { configStore: config, warnings, commandLimiter }).catch((error) => {
       console.error(redact(error))
     })
   })

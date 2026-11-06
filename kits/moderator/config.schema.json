@@ -64,6 +64,13 @@
             }
           }
         },
+        "exemptRoleIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 50,
+          "items": { "$ref": "#/definitions/snowflake" },
+          "description": "Members with one of these roles are not filtered. Staff permissions are always exempt."
+        },
         "raidMode": {
           "type": "object",
           "additionalProperties": false,

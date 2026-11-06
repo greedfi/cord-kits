@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/greedfi/cord-kits/blob/main/kits/giveaways/config.schema.json",
+  "title": "Giveaways kit config",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schedulerIntervalSeconds", "maxWinners", "maxDurationMinutes", "minAccountAgeHours", "guilds"],
+  "properties": {
+    "schedulerIntervalSeconds": {
+      "type": "integer",
+      "minimum": 5,
+      "maximum": 120,
+      "description": "How often the process looks for due giveaways. The end can be late by up to this many seconds."
+    },
+    "maxWinners": { "type": "integer", "minimum": 1, "maximum": 20 },
+    "maxDurationMinutes": { "type": "integer", "minimum": 1, "maximum": 43200 },
+    "minAccountAgeHours": { "type": "integer", "minimum": 0, "maximum": 8760 },
+    "guilds": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[0-9]{17,20}$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "managerRoleId": {
+            "oneOf": [
+              { "type": "string", "pattern": "^[0-9]{17,20}$" },
+              { "type": "null" }
+            ]
+          },
+          "maxWinners": { "type": "integer", "minimum": 1, "maximum": 20 },
+          "maxDurationMinutes": { "type": "integer", "minimum": 1, "maximum": 43200 },
+          "minAccountAgeHours": { "type": "integer", "minimum": 0, "maximum": 8760 }
+        }
+      }
+    }
+  }
+}

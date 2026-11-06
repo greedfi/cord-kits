@@ -10,12 +10,12 @@ permissions:
 
 jobs:
   test:
-    name: ${{ matrix.kit }} / Node 20
+    name: ${{ matrix.kit }} / Node 22
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        kit: [music, moderator]
+        kit: [music, moderator, giveaways, reaction-roles, feed-relay, tickets, welcome, leveling]
     defaults:
       run:
         working-directory: kits/${{ matrix.kit }}
@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: kits/${{ matrix.kit }}/package-lock.json
       - run: npm ci

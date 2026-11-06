@@ -1,8 +1,42 @@
 import { MessageFlags, PermissionFlagsBits } from 'discord.js'
+import { redact } from './env.js'
 import { MODERATION_BLOCK_REASON, moderationBlock } from './hierarchy.js'
 import { selectPurgeMessages } from './purge.js'
+import { describeJoinHold } from './raid.js'
 import { setRaidEnabled } from './settings.js'
 import { cleanText } from './text.js'
+
+export const COMMAND_PERMISSION = {
+  warn: PermissionFlagsBits.ModerateMembers,
+  timeout: PermissionFlagsBits.ModerateMembers,
+  kick: PermissionFlagsBits.KickMembers,
+  ban: PermissionFlagsBits.BanMembers,
+  purge: PermissionFlagsBits.ManageMessages,
+  raid: PermissionFlagsBits.ModerateMembers,
+}
+
+export function isUnknownMember(error) {
+  return error?.code === 10007
+}
+
+export async function resolveMember(guild, userId) {
+  try {
+    return { member: await guild.members.fetch(userId), error: null }
+  } catch (error) {
+    return { member: null, error }
+  }
+}
+
+export function auditReason(actorId, reason) {
+  return cleanText(`By ${actorId}: ${reason}`, 512)
+}
+
+async function actorMember(interaction) {
+  if (typeof interaction.member?.permissions?.has === 'function') return interaction.member
+  const resolved = await resolveMember(interaction.guild, interaction.user.id)
+  if (!resolved.member) throw new Error('Could not load your membership for this server.')
+  return resolved.member
+}
 
 async function botMember(guild) {
   return guild.members.me ?? guild.members.fetchMe()
@@ -34,13 +68,22 @@ function hierarchy(actor, target, bot, ownerId) {
   })
 }
 
+async function memberOrExplain(guild, userId) {
+  const resolved = await resolveMember(guild, userId)
+  if (resolved.member) return { member: resolved.member }
+  if (resolved.error && !isUnknownMember(resolved.error)) throw resolved.error
+  return { member: null }
+}
+
 async function warn(interaction, ctx) {
   const user = interaction.options.getUser('user', true)
   const reason = cleanText(interaction.options.getString('reason', true))
-  const member = await interaction.guild.members.fetch(user.id).catch(() => null)
+  const { member } = await memberOrExplain(interaction.guild, user.id)
   if (!member) return 'That user is not in this server.'
-  const actor = await interaction.guild.members.fetch(interaction.user.id)
-  if (member.id === actor.id) return MODERATION_BLOCK_REASON.self
+  const actor = await actorMember(interaction)
+  const bot = await botMember(interaction.guild)
+  const blocked = hierarchy(actor, member, bot, interaction.guild.ownerId)
+  if (blocked) return MODERATION_BLOCK_REASON[blocked]
   const result = ctx.warnings.add({
     guildId: interaction.guild.id,
     userId: member.id,
@@ -63,16 +106,17 @@ async function timeout(interaction, ctx) {
   const user = interaction.options.getUser('user', true)
   const minutes = interaction.options.getInteger('minutes', true)
   const reason = cleanText(interaction.options.getString('reason', true))
-  const member = await interaction.guild.members.fetch(user.id).catch(() => null)
+  const { member } = await memberOrExplain(interaction.guild, user.id)
   if (!member) return 'That user is not in this server.'
-  const actor = await interaction.guild.members.fetch(interaction.user.id)
+  const actor = await actorMember(interaction)
   const bot = await botMember(interaction.guild)
   if (!bot.permissions.has(PermissionFlagsBits.ModerateMembers)) {
     return 'I need the Moderate Members permission.'
   }
   const blocked = hierarchy(actor, member, bot, interaction.guild.ownerId)
   if (blocked) return MODERATION_BLOCK_REASON[blocked]
-  await member.timeout(minutes * 60 * 1000, reason)
+  const discordReason = auditReason(actor.id, reason)
+  await member.timeout(minutes * 60 * 1000, discordReason)
   const settings = ctx.configStore.get().guilds?.[interaction.guild.id]
   await sendLog(
     interaction.guild,
@@ -85,14 +129,15 @@ async function timeout(interaction, ctx) {
 async function kick(interaction, ctx) {
   const user = interaction.options.getUser('user', true)
   const reason = cleanText(interaction.options.getString('reason', true))
-  const member = await interaction.guild.members.fetch(user.id).catch(() => null)
+  const { member } = await memberOrExplain(interaction.guild, user.id)
   if (!member) return 'That user is not in this server.'
-  const actor = await interaction.guild.members.fetch(interaction.user.id)
+  const actor = await actorMember(interaction)
   const bot = await botMember(interaction.guild)
   if (!bot.permissions.has(PermissionFlagsBits.KickMembers)) return 'I need the Kick Members permission.'
   const blocked = hierarchy(actor, member, bot, interaction.guild.ownerId)
   if (blocked) return MODERATION_BLOCK_REASON[blocked]
-  await member.kick(reason)
+  const discordReason = auditReason(actor.id, reason)
+  await member.kick(discordReason)
   const settings = ctx.configStore.get().guilds?.[interaction.guild.id]
   await sendLog(
     interaction.guild,
@@ -106,10 +151,12 @@ async function ban(interaction, ctx) {
   const user = interaction.options.getUser('user', true)
   const reason = cleanText(interaction.options.getString('reason', true))
   const days = interaction.options.getInteger('delete_days') ?? 0
-  const actor = await interaction.guild.members.fetch(interaction.user.id)
+  const actor = await actorMember(interaction)
   const bot = await botMember(interaction.guild)
   if (!bot.permissions.has(PermissionFlagsBits.BanMembers)) return 'I need the Ban Members permission.'
-  const member = await interaction.guild.members.fetch(user.id).catch(() => null)
+  const resolved = await resolveMember(interaction.guild, user.id)
+  if (resolved.error && !isUnknownMember(resolved.error)) throw resolved.error
+  const member = resolved.member
   if (member) {
     const blocked = hierarchy(actor, member, bot, interaction.guild.ownerId)
     if (blocked) return MODERATION_BLOCK_REASON[blocked]
@@ -118,9 +165,10 @@ async function ban(interaction, ctx) {
   } else if (user.id === bot.id) {
     return MODERATION_BLOCK_REASON.bot
   }
+  const discordReason = auditReason(actor.id, reason)
   await interaction.guild.members.ban(user.id, {
     deleteMessageSeconds: days * 24 * 60 * 60,
-    reason,
+    reason: discordReason,
   })
   const settings = ctx.configStore.get().guilds?.[interaction.guild.id]
   await sendLog(
@@ -137,6 +185,11 @@ async function purge(interaction, ctx) {
   const channel = interaction.channel
   if (!channel || typeof channel.bulkDelete !== 'function' || channel.isDMBased?.()) {
     return 'I can only purge messages in a server text channel.'
+  }
+  const actor = await actorMember(interaction)
+  const actorPerms = channel.permissionsFor?.(actor)
+  if (!actorPerms?.has(PermissionFlagsBits.ManageMessages)) {
+    return 'You need Manage Messages in this channel.'
   }
   const bot = await botMember(interaction.guild)
   const permissions = channel.permissionsFor(bot)
@@ -157,28 +210,26 @@ async function purge(interaction, ctx) {
   if (batch.size === 0) return 'No matching messages younger than 14 days.'
   const deleted = await channel.bulkDelete(batch, true)
   const settings = ctx.configStore.get().guilds?.[interaction.guild.id]
-  const actor = interaction.user
+  const logActor = interaction.user
   await sendLog(
     interaction.guild,
     settings,
-    `purge: ${actor.tag} (${actor.id}) deleted ${deleted.size} message(s) in <#${channel.id}>${user ? ` from ${user.tag}` : ''}.`,
+    `purge: ${logActor.tag} (${logActor.id}) deleted ${deleted.size} message(s) in <#${channel.id}>${user ? ` from ${user.tag}` : ''}.`,
   )
   return `Deleted ${deleted.size} message(s).`
 }
 
 function raidReply(settings, enabled) {
-  if (!enabled) return 'Raid mode is off. Slowmode on channels this bot changed is restored.'
+  if (!enabled) {
+    return 'Raid mode is off. Previous slowmode is restored only after Discord accepts the change. A failed restore stays saved and is tried again.'
+  }
   const lines = ['Raid mode is on.']
   if (settings.raidMode.channelIds.length === 0) {
     lines.push('channelIds is empty, so no slowmode was applied.')
   } else {
     lines.push(`Slowmode is ${settings.raidMode.slowmodeSeconds}s on ${settings.raidMode.channelIds.length} channel(s).`)
   }
-  const hold = settings.raidMode.joinHold
-  if (hold.type === 'timeout') lines.push(`New joins are timed out for ${hold.timeoutMinutes} minute(s).`)
-  else if (hold.type === 'role' && hold.roleId) lines.push(`New joins receive the role <@&${hold.roleId}>.`)
-  else if (hold.type === 'role') lines.push('Join hold is set to a role, but roleId is missing.')
-  else lines.push('Join hold is off.')
+  lines.push(describeJoinHold(settings.raidMode.joinHold))
   return lines.join(' ')
 }
 
@@ -205,12 +256,32 @@ export async function execute(interaction, ctx) {
     return
   }
   try {
+    const required = COMMAND_PERMISSION[interaction.commandName]
+    const actor = await actorMember(interaction)
+    if (!required || !actor.permissions.has(required)) {
+      await interaction.reply({
+        content: 'You do not have permission to use that command.',
+        flags: MessageFlags.Ephemeral,
+      })
+      return
+    }
+    if (ctx.commandLimiter) {
+      const decision = ctx.commandLimiter.take(`${interaction.guild.id}:${interaction.user.id}`)
+      if (!decision.allowed) {
+        await interaction.reply({
+          content: 'You are sending moderation commands too quickly. Wait and try again.',
+          flags: MessageFlags.Ephemeral,
+        })
+        return
+      }
+    }
     await interaction.deferReply({ flags: MessageFlags.Ephemeral })
     const content = await handler(interaction, ctx)
     await interaction.editReply(content)
   } catch (error) {
-    console.error(error instanceof Error ? error.message : error)
-    const text = error instanceof Error ? error.message : 'Command failed.'
+    const detail = redact(error instanceof Error ? error.message : error).slice(0, 200)
+    console.error(detail)
+    const text = detail || 'Command failed.'
     if (interaction.deferred || interaction.replied) {
       await interaction.editReply(text).catch((editError) => {
         console.error(`Could not report the command error: ${editError.message}`)

@@ -1,0 +1,9 @@
+{
+  "maxOptions": 25,
+  "guilds": {
+    "111111111111111111": {
+      "managerRoleId": null,
+      "maxOptions": 10
+    }
+  }
+}

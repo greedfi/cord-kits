@@ -22,6 +22,7 @@ export function defaultGuildSettings() {
         roleId: null,
       },
     },
+    exemptRoleIds: [],
   }
 }
 

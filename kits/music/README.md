@@ -2,7 +2,7 @@
 
 A discord.js v14 music bot for one server at a time, with a queue per guild. Sources are SoundCloud, direct audio files, internet radio streams, and uploaded attachments. YouTube links are rejected. This kit does not use ytdl, play-dl, or yt-dlp.
 
-Requires Node.js 20 or newer. `@discordjs/voice` 0.19 is pinned because Discord voice channels require the DAVE protocol. That package's own metadata asks for Node.js 22.12 or newer; the published build loads on Node.js 20 (this repo's CI imports it there), including `@snazzah/davey`.
+Requires Node.js 22.12 or newer. `@discordjs/voice` 0.19 is pinned because Discord voice channels require the DAVE protocol, and that package declares `engines.node` of `>=22.12.0`. This kit uses the same engine and `engine-strict=true`. npm refuses the install on Node.js 20 instead of warning with `EBADENGINE` and continuing. Node.js 20 is not a supported runtime here. CI and the Docker image use Node.js 22.
 
 ## Intents
 
@@ -81,7 +81,11 @@ SoundCloud playlists queue up to `maxQueueSize` tracks. Each track's stream is r
 
 ## Hosting
 
-`Dockerfile` uses `node:20-slim`, installs ffmpeg, and runs as the `node` user. `railway.json` sets `restartPolicyType` to `ALWAYS`.
+`Dockerfile` uses `node:22-slim`, fails the build if that image is older than Node.js 22.12.0, installs ffmpeg, and runs as the `node` user. `railway.json` sets `restartPolicyType` to `ALWAYS`.
+
+The process stays connected to the Discord Gateway and to voice. It is not deployable to Vercel or to another host that suspends the process when it is idle. Run it as a long-lived container. Railway charges for that service; this repository does not promise free hosting.
+
+Playback state is in memory and is gone after a restart. `config.json` is not copied into the image. Put it at `/app/config.json` or set `CONFIG_PATH` on a persistent volume. A bad edit keeps the last good file. Changing that file is a host change. This kit has no management HTTP API.
 
 Point the Railway service root at `kits/music`. Set `DISCORD_BOT_TOKEN` and `CLIENT_ID` in the service variables. The image reads `/app/config.json` (or `CONFIG_PATH`). Copy `config.example.json` to that path; the file is gitignored, so a git deploy does not include it. Mount it or bake it into a private image. The process exits with a clear error when the file is missing.
 

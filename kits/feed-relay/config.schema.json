@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/greedfi/cord-kits/blob/main/kits/feed-relay/config.schema.json",
+  "title": "Feed relay kit config",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["pollIntervalSeconds", "guilds"],
+  "properties": {
+    "pollIntervalSeconds": {
+      "type": "integer",
+      "minimum": 120,
+      "maximum": 86400,
+      "description": "Minimum time between fetches of the same feed. The process still has to stay running."
+    },
+    "guilds": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[0-9]{17,20}$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["destinations", "feeds"],
+        "properties": {
+          "destinations": {
+            "type": "array",
+            "uniqueItems": true,
+            "maxItems": 20,
+            "items": { "type": "string", "pattern": "^[0-9]{17,20}$" }
+          },
+          "feeds": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "url", "channelId"],
+              "properties": {
+                "id": { "type": "string", "pattern": "^[a-z0-9-]{1,32}$" },
+                "url": { "type": "string", "pattern": "^https://", "maxLength": 500 },
+                "channelId": { "type": "string", "pattern": "^[0-9]{17,20}$" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

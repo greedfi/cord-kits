@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/greedfi/cord-kits/blob/main/kits/tickets/config.schema.json",
+  "title": "Tickets kit config",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["guilds"],
+  "properties": {
+    "guilds": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[0-9]{17,20}$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["staffRoleId", "categoryId", "oneActive", "transcripts"],
+        "properties": {
+          "staffRoleId": { "type": "string", "pattern": "^[0-9]{17,20}$" },
+          "categoryId": {
+            "oneOf": [
+              { "type": "string", "pattern": "^[0-9]{17,20}$" },
+              { "type": "null" }
+            ]
+          },
+          "oneActive": { "type": "boolean" },
+          "transcripts": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}
