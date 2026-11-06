@@ -22,7 +22,8 @@
           "timeoutMinutes": 10,
           "roleId": null
         }
-      }
+      },
+      "exemptRoleIds": []
     }
   }
 }

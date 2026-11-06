@@ -58,6 +58,9 @@ describe('moderator config', () => {
     const extra = { ...example, extra: true }
     assert.equal(parseConfigText(JSON.stringify(extra), validate).ok, false)
     assert.throws(() => storeFrom('{'), ConfigError)
+    const legacy = structuredClone(example)
+    delete legacy.guilds[guildId].exemptRoleIds
+    assert.equal(parseConfigText(JSON.stringify(legacy), validate).ok, true)
   })
 
   test('reload keeps the last good config when JSON or the schema is bad', () => {

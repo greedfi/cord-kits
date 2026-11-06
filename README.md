@@ -33,7 +33,7 @@ Permission integer: **1099780140054**
 https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot%20applications.commands&permissions=1099780140054
 ```
 
-Manage Channels is there so raid mode can set slowmode. Manage Roles is there so raid mode can assign a join-hold role. Moderate Members covers timeouts, including the join hold.
+Manage Channels is there so raid mode can set slowmode. Manage Roles is there so raid mode can assign a join-hold role. That assignment is refused for `@everyone`, managed roles, and elevated roles, and raid mode does not edit channel overwrites. Moderate Members covers timeouts, including the join hold, and only when the member is moderatable.
 
 ## Setup
 
