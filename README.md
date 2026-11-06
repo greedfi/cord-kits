@@ -10,6 +10,7 @@ Tested discord.js v14 starter kits for .cord. Each kit lives in its own folder, 
 | Reaction roles | [kits/reaction-roles](kits/reaction-roles) |
 | Feed relay | [kits/feed-relay](kits/feed-relay) |
 | Tickets | [kits/tickets](kits/tickets) |
+| Welcome | [kits/welcome](kits/welcome) |
 
 Neither invite asks for Administrator.
 
@@ -95,6 +96,20 @@ https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot%20applicati
 
 This kit opens a private channel, not a thread. @everyone cannot view it. A Discord administrator still can. Transcripts, when enabled, are a staff-role file, not a public channel. See [kits/tickets](kits/tickets).
 
+## Welcome
+
+Intents: `Guilds`, `GuildMembers`. Server Members is privileged.
+
+Permissions: View Channel, Send Messages, Manage Roles.
+
+Permission integer: **268438528**
+
+```
+https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot%20applications.commands&permissions=268438528
+```
+
+Join and leave messages, an optional non-privileged role, and a rules button. The button is not identity verification and does not bypass Discord membership screening. See [kits/welcome](kits/welcome).
+
 ## Setup
 
 Each kit has its own `package.json`.
@@ -123,6 +138,7 @@ cd kits/giveaways && npm ci && npm run lint && npm test
 cd kits/reaction-roles && npm ci && npm run lint && npm test
 cd kits/feed-relay && npm ci && npm run lint && npm test
 cd kits/tickets && npm ci && npm run lint && npm test
+cd kits/welcome && npm ci && npm run lint && npm test
 ```
 
 ## Hosting

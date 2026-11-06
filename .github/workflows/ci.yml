@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        kit: [music, moderator, giveaways, reaction-roles, feed-relay, tickets]
+        kit: [music, moderator, giveaways, reaction-roles, feed-relay, tickets, welcome]
     defaults:
       run:
         working-directory: kits/${{ matrix.kit }}

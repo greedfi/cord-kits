@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/greedfi/cord-kits/blob/main/kits/welcome/config.schema.json",
+  "title": "Welcome kit config",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["guilds"],
+  "properties": {
+    "guilds": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[0-9]{17,20}$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["welcomeChannelId", "leaveChannelId", "welcomeMessage", "leaveMessage", "autoRoleId", "rulesRoleId"],
+        "properties": {
+          "welcomeChannelId": { "oneOf": [{ "type": "string", "pattern": "^[0-9]{17,20}$" }, { "type": "null" }] },
+          "leaveChannelId": { "oneOf": [{ "type": "string", "pattern": "^[0-9]{17,20}$" }, { "type": "null" }] },
+          "welcomeMessage": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "leaveMessage": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "autoRoleId": { "oneOf": [{ "type": "string", "pattern": "^[0-9]{17,20}$" }, { "type": "null" }] },
+          "rulesRoleId": { "oneOf": [{ "type": "string", "pattern": "^[0-9]{17,20}$" }, { "type": "null" }] }
+        }
+      }
+    }
+  }
+}
