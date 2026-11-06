@@ -5,7 +5,7 @@
   "description": "Discord moderator starter kit: word and link filters, warn, timeout, kick, ban, purge, mod log, and raid mode.",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12.0"
   },
   "scripts": {
     "start": "node src/index.js",

@@ -1,6 +1,6 @@
 # cord-kits
 
-Tested discord.js v14 starter kits for .cord. Each kit lives in its own folder, targets Node.js 20 or newer, and ships with unit tests. The music kit plays SoundCloud, direct audio, internet radio, and attachments. It rejects YouTube and does not depend on ytdl, play-dl, or yt-dlp. The moderator kit filters words and links, runs warn / timeout / kick / ban / purge, writes a mod log, and can put a server into raid mode.
+Tested discord.js v14 starter kits for .cord. Each kit lives in its own folder, targets Node.js 22.12 or newer, and ships with unit tests. Node.js 20 is not a supported runtime: the music kit's `@discordjs/voice` dependency declares `>=22.12.0`, and every kit sets `engine-strict=true` so npm does not ignore `EBADENGINE`. The music kit plays SoundCloud, direct audio, internet radio, and attachments. It rejects YouTube and does not depend on ytdl, play-dl, or yt-dlp. The moderator kit filters words and links, runs warn / timeout / kick / ban / purge, writes a mod log, and can put a server into raid mode.
 
 | Kit | Path |
 | --- | --- |
@@ -54,7 +54,7 @@ Secrets stay in the environment: `DISCORD_BOT_TOKEN`, `CLIENT_ID`, and optional 
 
 ## Tests
 
-GitHub Actions runs lint and `node --test` on Node.js 20 for both kits.
+GitHub Actions runs lint and `node --test` on Node.js 22 for both kits.
 
 ```bash
 cd kits/music && npm ci && npm run lint && npm test
@@ -63,7 +63,11 @@ cd kits/moderator && npm ci && npm run lint && npm test
 
 ## Hosting
 
-Each kit has a `Dockerfile` based on `node:20-slim`. The music image also installs ffmpeg. `railway.json` sets `restartPolicyType` to `ALWAYS` so the process comes back if it exits. Set the Railway service root to the kit directory (`kits/music` or `kits/moderator`), set the token and client id as variables, and provide `config.json` at `/app/config.json` or via `CONFIG_PATH`.
+Each kit has a `Dockerfile` based on `node:22-slim`. The build exits if that image is older than Node.js 22.12.0. The music image also installs ffmpeg. `railway.json` sets `restartPolicyType` to `ALWAYS` so the process comes back if it exits. Set the Railway service root to the kit directory (`kits/music` or `kits/moderator`), set the token and client id as variables, and provide `config.json` at `/app/config.json` or via `CONFIG_PATH`.
+
+These kits log in to the Discord Gateway and keep running. They are not deployable to Vercel or other serverless platforms. A host that suspends the process will miss voice, filters, and raid sync. Railway (or any similar container host) bills for the always-on service. This repository does not promise free hosting.
+
+`config.json` is read from disk and reloaded in the process. It is not a remote API. Changing it for a running bot takes access to that host's file (or another change the host operator approves). There is no unauthenticated management port. A new image does not overwrite a customer's `config.json` or `data/` directory.
 
 ## Releases
 

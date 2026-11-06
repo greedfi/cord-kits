@@ -31,11 +31,19 @@ describe('music packaging', () => {
     for (const pattern of banned) assert.equal(pattern.test(sources), false, String(pattern))
   })
 
-  test('docker and railway stay on Node 20 and restart', () => {
+  test('docker and engines match @discordjs/voice and railway restarts', () => {
     const docker = readFileSync(path.join(root, 'Dockerfile'), 'utf8')
-    assert.match(docker, /node:20-slim/)
+    assert.match(docker, /node:22-slim/)
+    assert.match(docker, /22\.12\.0/)
     assert.match(docker, /ffmpeg/)
     assert.match(docker, /USER node/)
+    assert.match(docker, /engine-strict|npmrc/)
+    const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'))
+    assert.equal(pkg.engines.node, '>=22.12.0')
+    const npmrc = readFileSync(path.join(root, '.npmrc'), 'utf8')
+    assert.match(npmrc, /^engine-strict=true$/m)
+    const voice = JSON.parse(readFileSync(path.join(root, 'node_modules/@discordjs/voice/package.json'), 'utf8'))
+    assert.equal(voice.engines.node, '>=22.12.0')
     const railway = JSON.parse(readFileSync(path.join(root, 'railway.json'), 'utf8'))
     assert.equal(railway.deploy.restartPolicyType, 'ALWAYS')
     const ignore = readFileSync(path.join(root, '.gitignore'), 'utf8')
@@ -44,6 +52,8 @@ describe('music packaging', () => {
     const env = readFileSync(path.join(root, '.env.example'), 'utf8')
     assert.match(env, /^DISCORD_BOT_TOKEN=$/m)
     assert.match(env, /^CLIENT_ID=$/m)
+    const source = readFileSync(path.join(root, 'src/index.js'), 'utf8')
+    assert.doesNotMatch(source, /createServer|listen\(/)
   })
 
   test('voice stack loads and resolves DAVE', async () => {

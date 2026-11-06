@@ -2,7 +2,7 @@
 
 A discord.js v14 moderation bot. Settings are per server in `config.json`. It filters words and links, records warnings, times out, kicks, bans, purges, writes a mod log, and can enable raid mode (slowmode on configured channels, plus a timeout or role gate for new joins).
 
-Requires Node.js 20 or newer. The invite does not request Administrator.
+Requires Node.js 22.12 or newer (`engines` and `engine-strict=true`). Node.js 20 is outside this kit's supported runtime. The invite does not request Administrator.
 
 ## Intents
 
@@ -114,6 +114,8 @@ Bot messages are not filtered. A role gate adds the role; it does not remove oth
 
 ## Hosting
 
-`Dockerfile` uses `node:20-slim` and runs as the `node` user. `railway.json` sets `restartPolicyType` to `ALWAYS`.
+`Dockerfile` uses `node:22-slim`, fails the build if the image is older than Node.js 22.12.0, and runs as the `node` user. `railway.json` sets `restartPolicyType` to `ALWAYS`.
+
+This is a Gateway bot. It is not deployable to Vercel or another serverless host that stops the process between requests. Filters, join hold, and raid sync run only while the process is up. Railway bills the running service; nothing here is guaranteed free.
 
 Point the Railway service root at `kits/moderator`. Set `DISCORD_BOT_TOKEN` and `CLIENT_ID`. Provide `config.json` at `/app/config.json` or `CONFIG_PATH`. The file is gitignored, so a git deploy does not include it. The `node` user must be able to write `config.json` for `/raid`, and write `data/` for warnings and raid snapshots.
