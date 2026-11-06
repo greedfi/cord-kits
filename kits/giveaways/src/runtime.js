@@ -11,11 +11,13 @@ import { redact } from './env.js'
 import {
   announcementMarker,
   dueIds,
+  giveawayNonce,
   HISTORY_PAGE,
   HISTORY_PAGES,
   insertGiveaway,
   joinGiveaway,
   leaveGiveaway,
+  markSending,
   mentionPayload,
   newGiveawayId,
   planCancel,
@@ -110,7 +112,11 @@ export function createRuntime({
   fetchGuild,
   log = (message) => console.error(redact(message)),
   buttonLimiter = createRateLimiter({ limit: 5, windowMs: 10_000 }),
+  lock = null,
 }) {
+  function held() {
+    lock?.assertHeld?.()
+  }
   let bound = null
   let timer = null
   let ticking = false
@@ -203,30 +209,67 @@ export function createRuntime({
     await message.edit(payload)
   }
 
+  async function claimSend(giveaway) {
+    return store.update((data) => {
+      const live = readGiveaway(data, giveaway.guildId, giveaway.id)
+      if (!live) return { ok: false, reason: 'missing' }
+      if (live.messageId) return { ok: false, reason: 'sent', messageId: live.messageId }
+      if (live.delivery === 'sending' || live.delivery === 'sent') return { ok: false, reason: 'attempted' }
+      markSending(live)
+      return { ok: true }
+    })
+  }
+
   async function publish(giveaway) {
+    held()
     const channel = await channelOf(giveaway)
     const payload = payloadFor(giveaway)
     const botId = await botIdFor(giveaway)
     let messageId = giveaway.messageId
     let justSent = false
     if (!messageId) {
-      const located = await locateAnnouncement(channel, giveaway, botId)
+      const attempted = giveaway.delivery === 'sending' || giveaway.delivery === 'sent'
+      let located = { found: false, complete: false }
+      try {
+        located = await locateAnnouncement(channel, giveaway, botId)
+      } catch (error) {
+        if (attempted) {
+          throw new Error(`Giveaway history could not be checked after a send attempt: ${error.message}`)
+        }
+      }
       if (located.found) {
         messageId = located.messageId
         await remember(giveaway, messageId)
-      } else if (!located.complete) {
-        throw new Error('Giveaway history is incomplete, so another message was not sent.')
+      } else if (attempted && !located.complete) {
+        throw new Error('Giveaway history is incomplete after a send attempt, so another message was not sent.')
       } else {
         if (!String(payload.content).includes(announcementMarker(giveaway.id))) {
           throw new Error('Giveaway message is missing its id marker.')
         }
-        const message = await channel.send(payload)
-        messageId = message.id
-        justSent = true
-        await remember(giveaway, messageId)
+        if (!attempted) {
+          const claim = await claimSend(giveaway)
+          if (!claim.ok) {
+            if (claim.messageId) messageId = claim.messageId
+            else throw new Error('Giveaway send was already attempted. Not sending another copy until history shows the result.')
+          }
+        }
+        if (!messageId) {
+          held()
+          const message = await channel.send({
+            ...payload,
+            nonce: giveawayNonce(giveaway.id),
+            enforceNonce: true,
+          })
+          messageId = message.id
+          justSent = true
+          await remember(giveaway, messageId)
+        }
       }
     }
-    if (!justSent) await editAnnouncement(channel, messageId, payload)
+    if (!justSent) {
+      held()
+      await editAnnouncement(channel, messageId, payload)
+    }
     await store.update((data) => {
       const live = readGiveaway(data, giveaway.guildId, giveaway.id)
       if (!live) return
@@ -238,6 +281,7 @@ export function createRuntime({
   }
 
   async function settleOnce(guildId, id) {
+    held()
     const snapshot = await store.read()
     const current = readGiveaway(snapshot, guildId, id)
     if (!current) return { action: 'missing' }
@@ -484,6 +528,7 @@ export function createRuntime({
 
   async function handleInteraction(interaction) {
     try {
+      held()
       if (interaction.isChatInputCommand?.() && interaction.commandName === 'giveaway') {
         if (!interaction.inGuild()) {
           await ephemeral(interaction, 'This bot only works in servers.')
@@ -519,6 +564,7 @@ export function createRuntime({
       }
     } catch (error) {
       log(redact(error instanceof Error ? error.message : error))
+      if (error?.code === 'LEASE_LOST') return
       await ephemeral(interaction, 'Command failed.').catch(() => {})
     }
   }

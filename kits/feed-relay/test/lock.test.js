@@ -23,4 +23,33 @@ describe('instance lock', () => {
       dir.remove()
     }
   })
+
+  test('a paused loop loses the lease once another start takes the expired file', () => {
+    const dir = tempDir()
+    const file = dir.path('instance.lock')
+    const calls = []
+    try {
+      const now = { value: 1_000 }
+      const first = acquireInstanceLock(file, {
+        now: () => now.value,
+        leaseMs: 500,
+        token: 'a',
+        onLost() { calls.push('lost') },
+      })
+      assert.throws(
+        () => acquireInstanceLock(file, { now: () => now.value, leaseMs: 500, token: 'b' }),
+        (error) => error.code === 'LOCKED',
+      )
+      now.value = 10_000
+      const second = acquireInstanceLock(file, { now: () => now.value, leaseMs: 500, token: 'b' })
+      assert.throws(() => first.assertHeld(), (error) => error.code === 'LEASE_LOST')
+      assert.deepEqual(calls, ['lost'])
+      second.assertHeld()
+      assert.throws(() => first.assertHeld(), (error) => error.code === 'LEASE_LOST')
+      second.release()
+      first.release()
+    } finally {
+      dir.remove()
+    }
+  })
 })

@@ -52,10 +52,15 @@ export function createRuntime({
   readMessages,
   fsImpl = fs,
   log = (message) => console.error(redact(message)),
+  lock = null,
 }) {
+  function held() {
+    lock?.assertHeld?.()
+  }
   let bound = null
 
   async function guildOf(guildId) {
+    held()
     if (fetchGuild) return fetchGuild(guildId)
     if (!bound) throw new Error('Client is not ready.')
     return bound.guilds.fetch(guildId)
@@ -71,6 +76,7 @@ export function createRuntime({
   }
 
   async function openTicket(interaction, reason) {
+    held()
     const settings = settingsFor(interaction.guild.id)
     if (!settings?.staffRoleId) {
       await ephemeral(interaction, 'This server has no staff role configured, so tickets stay closed.')
@@ -269,6 +275,7 @@ export function createRuntime({
 
   async function handleInteraction(interaction) {
     try {
+      held()
       if (interaction.isChatInputCommand?.() && interaction.commandName === 'ticket') {
         if (!interaction.inGuild()) {
           await ephemeral(interaction, 'This bot only works in servers.')
@@ -335,6 +342,7 @@ export function createRuntime({
       }
     } catch (error) {
       log(redact(error instanceof Error ? error.message : error))
+      if (error?.code === 'LEASE_LOST') return
       await ephemeral(interaction, 'Command failed.').catch(() => {})
     }
   }

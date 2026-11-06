@@ -162,12 +162,13 @@ describe('feed runtime', () => {
     const store = {
       read: () => real.read(),
       update: (mutator) => real.update(async (data) => {
-        const before = JSON.stringify(data.feeds ?? {})
         const result = await mutator(data)
-        const after = JSON.stringify(data.feeds ?? {})
-        if (crash && before !== after && after.includes('"b"')) {
-          crash = false
-          throw new Error('crash before persist')
+        if (crash) {
+          const state = data.feeds?.[`${GUILD}:news`]
+          if (Array.isArray(state?.seen) && state.seen.includes('b')) {
+            crash = false
+            throw new Error('crash before persist')
+          }
         }
         return result
       }),
@@ -210,6 +211,81 @@ describe('feed runtime', () => {
       assert.equal(sent.length, 1)
       const saved = await createJsonStore(dir.path('feeds.json')).read()
       assert.ok(saved.feeds[`${GUILD}:news`].seen.includes('b'))
+    } finally {
+      runtime.shutdown()
+      dir.remove()
+    }
+  })
+
+  test('a first feed post is not blocked by a busy channel, and an attempted post fails closed', async () => {
+    const dir = tempDir()
+    const sent = []
+    const history = Array.from({ length: 600 }, (_, index) => ({
+      id: `busy-${index}`,
+      content: 'unrelated',
+      author: { id: '999999999999999999' },
+    }))
+    let failHistory = false
+    const channel = {
+      id: CHANNEL,
+      guildId: GUILD,
+      async send(payload) { sent.push(payload) },
+      messages: {
+        async fetch() {
+          if (failHistory) throw new Error('history down')
+          return { values() { return history.slice() } }
+        },
+      },
+    }
+    const guild = {
+      id: GUILD,
+      members: { me: { id: '999999999999999999' } },
+      channels: { cache: new Map([[CHANNEL, channel]]), async fetch() { return channel } },
+    }
+    const store = createJsonStore(dir.path('feeds.json'))
+    let time = 1_000
+    let ids = ['a']
+    const runtime = createRuntime({
+      configStore: {
+        get: () => ({
+          pollIntervalSeconds: 300,
+          guilds: {
+            [GUILD]: {
+              destinations: [CHANNEL],
+              feeds: [{ id: 'news', url: 'https://example.com/feed.xml', channelId: CHANNEL }],
+            },
+          },
+        }),
+        onReload() { return () => {} },
+      },
+      store,
+      now: () => time,
+      fetchGuild: async () => guild,
+      fetchFeed: async () => xml(ids),
+    })
+    try {
+      await runtime.tick()
+      time += 300_000
+      ids = ['a', 'b']
+      await runtime.tick()
+      assert.equal(sent.length, 1)
+      assert.equal(sent[0].enforceNonce, true)
+      assert.match(sent[0].nonce, /^f[0-9a-f]{16}$/)
+      const key = `${GUILD}:news`
+      const posted = await store.read()
+      assert.ok(posted.feeds[key].seen.includes('b'))
+      await store.update((data) => {
+        data.feeds[key].seen = data.feeds[key].seen.filter((id) => id !== 'b')
+        data.feeds[key].inflight = ['b']
+        data.feeds[key].nextAttemptAt = 0
+      })
+      failHistory = true
+      time += 300_000
+      await runtime.tick()
+      assert.equal(sent.length, 1)
+      const saved = await store.read()
+      assert.equal(saved.feeds[key].seen.includes('b'), false)
+      assert.deepEqual(saved.feeds[key].inflight, ['b'])
     } finally {
       runtime.shutdown()
       dir.remove()

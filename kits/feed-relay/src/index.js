@@ -24,10 +24,17 @@ export async function main() {
     logger: createLogger(),
   })
   const paths = dataPaths()
-  const lock = acquireInstanceLock(paths.lock)
+  let runtime
+  let client
+  const lock = acquireInstanceLock(paths.lock, {
+    onLost() {
+      runtime?.shutdown?.()
+      client?.destroy?.()
+    },
+  })
   const store = createJsonStore(paths.store)
-  const runtime = createRuntime({ configStore: config, store })
-  const client = new Client({ intents: [GatewayIntentBits.Guilds] })
+  runtime = createRuntime({ configStore: config, store, lock })
+  client = new Client({ intents: [GatewayIntentBits.Guilds] })
   runtime.bind(client)
   const shutdown = () => {
     runtime.shutdown()

@@ -30,6 +30,22 @@ export function planSlowmodeSync(state, desired, readCurrent) {
   return { state: next, changes }
 }
 
+export function stateBeforeUncertainApply(prior, preview) {
+  const next = new Map()
+  for (const [id, entry] of prior) {
+    next.set(id, { previous: entry.previous, applied: entry.applied })
+  }
+  for (const [id, entry] of preview.state) {
+    const existing = prior.get(id)
+    if (existing) {
+      next.set(id, { previous: existing.previous, applied: existing.applied })
+    } else {
+      next.set(id, { previous: entry.previous, applied: entry.previous })
+    }
+  }
+  return next
+}
+
 export function stateAfterApply(previous, preview, failedIds) {
   const failed = failedIds instanceof Set ? failedIds : new Set(failedIds)
   const next = new Map()

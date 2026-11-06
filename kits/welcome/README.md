@@ -13,7 +13,7 @@ Requires Node.js 22.12 or newer. The invite does not request Administrator. Auto
 
 Turn on **Server Members Intent**. Without it, join and leave events do not arrive. This kit does not enable Message Content.
 
-A member with `pending: true` is still in Discord membership screening. The bot does not welcome them and does not add a role. It does not call any API to approve or skip screening. When Discord reports the member as no longer pending, the welcome runs once. A second event does not send a second welcome. Leaving clears that record, so a later rejoin can be welcomed again.
+A member with `pending: true` is still in Discord membership screening. The bot records that and does not welcome them or add a role. It does not call any API to approve or skip screening. A later update welcomes them when the new member is not pending and either the cached member was pending or this process recorded that screening join. A missing cache alone does not welcome someone: there is no historical backfill. A second event, including one after a restart, does not send a second welcome or add the role again. A member who is still pending is refused. Leaving clears the record, so a later rejoin can be welcomed again. Joins that happen while the process is offline are missed and stay missed.
 
 ## Permissions
 
@@ -44,7 +44,7 @@ npm run register
 npm start
 ```
 
-`welcome.json` remembers who was already welcomed. It lives in `DATA_DIR` (the image uses `/data`). Mount a volume. `welcome.json.bak` is the previous good write. Copy both to back up. A bad `config.json` keeps the last good file. There is no HTTP API. A new image does not replace a customer's files.
+`welcome.json` remembers who was already welcomed and who was seen in screening. It lives in `DATA_DIR` (the image uses `/data`). Mount a volume on one machine. `welcome.json.bak` is the previous good write. Copy both to back up. A bad `config.json` keeps the last good file. There is no HTTP API. A new image does not replace a customer's files. A file beside that data is a single-process lease. It is not a distributed lock. Run one process. Do not run a second replica. Do not put the data directory on network-shared storage. If this process loses the lease, it stops sending and stops changing roles.
 
 This process must stay connected to the Gateway. It is not deployable to Vercel or another host that suspends the process. It will miss joins while it is down and does not backfill them. Railway bills the running container. Nothing here is guaranteed free.
 

@@ -99,10 +99,15 @@ export function createRuntime({
   fetchGuild,
   log = (message) => console.error(redact(message)),
   buttonLimiter = createRateLimiter({ limit: 5, windowMs: 10_000 }),
+  lock = null,
 }) {
+  function held() {
+    lock?.assertHeld?.()
+  }
   let bound = null
 
   async function guildOf(guildId) {
+    held()
     if (fetchGuild) return fetchGuild(guildId)
     if (!bound) throw new Error('Client is not ready.')
     return bound.guilds.fetch(guildId)
@@ -269,6 +274,7 @@ export function createRuntime({
   }
 
   async function press(interaction, panelId, requested) {
+    held()
     const decision = buttonLimiter.take(`${interaction.guild.id}:${interaction.user.id}`)
     if (!decision.allowed) {
       await ephemeral(interaction, 'You are pressing that too quickly.')
@@ -351,6 +357,7 @@ export function createRuntime({
 
   async function handleInteraction(interaction) {
     try {
+      held()
       if (interaction.isChatInputCommand?.() && interaction.commandName === 'roles') {
         if (!interaction.inGuild()) {
           await ephemeral(interaction, 'This bot only works in servers.')
@@ -395,6 +402,7 @@ export function createRuntime({
       }
     } catch (error) {
       log(redact(error instanceof Error ? error.message : error))
+      if (error?.code === 'LEASE_LOST') return
       await ephemeral(interaction, 'Command failed.').catch(() => {})
     }
   }

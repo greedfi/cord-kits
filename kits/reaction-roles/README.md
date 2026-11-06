@@ -52,7 +52,7 @@ Secrets are `DISCORD_BOT_TOKEN`, `CLIENT_ID`, and optional `GUILD_ID`. Logs reda
 
 ## Storage
 
-The image sets `DATA_DIR=/data` and `CONFIG_PATH=/data/config.json`. Mount a volume on `/data`. `panels.json` is the state. The previous good write is kept as `panels.json.bak`. If the main file is corrupt, the process restores the backup. If both are corrupt, it refuses to start. Copy both files to back up. Run one replica; a second process on the same directory is blocked by the lock while the lease is valid.
+The image sets `DATA_DIR=/data` and `CONFIG_PATH=/data/config.json`. Mount a volume on `/data`. `panels.json` is the state. The previous good write is kept as `panels.json.bak`. If the main file is corrupt, the process restores the backup. If both are corrupt, it refuses to start. Copy both files to back up. Run one process. A second process on the same directory is blocked while the file lease is valid. That lease is not a distributed lock. Do not run a second replica. Do not put the data directory on network-shared storage. If this process loses the lease, it stops changing roles and stops posting panels.
 
 Clicks are serialized in the process so two clicks cannot both pass an exclusive check. This is a Gateway bot. It is not deployable to Vercel or another host that stops the process. Railway bills the running container. Nothing here is guaranteed free.
 

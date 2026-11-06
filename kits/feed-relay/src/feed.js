@@ -8,6 +8,11 @@ export function entryMarker(feedKey, entryId) {
   return `\u200bref:${hash}`
 }
 
+export function feedNonce(marker) {
+  const hash = String(marker ?? '').match(/[0-9a-f]{16}/)?.[0] ?? ''
+  return `f${hash}`.slice(0, 25)
+}
+
 export function scanFeedPages(pages, { marker, botId }) {
   const list = Array.isArray(pages) ? pages : []
   for (const page of list) {
@@ -113,9 +118,11 @@ export function commitSeen(state, { seed = false, seedIds = [], postedIds = [], 
   const seen = seed
     ? seedIds.slice(-500)
     : [...(previous.seen ?? []), ...postedIds].slice(-500)
+  const posted = new Set(postedIds)
   return {
     seeded: true,
     seen,
+    inflight: (previous.inflight ?? []).filter((id) => !seen.includes(id) && !posted.has(id)),
     failures: 0,
     nextAttemptAt: now + intervalMs,
     lastError: null,

@@ -82,7 +82,7 @@ npm start
 
 Global commands can take up to an hour to appear. Use either guild or global registration, not both, or delete the old set in the Developer Portal.
 
-Warnings are stored in `data/warnings.json`. Raid slowmode snapshots are stored in `data/raid-snapshots.json` so a restart can restore the previous slowmode. Set `DATA_DIR` to move both files. The default is `./data` relative to the working directory. Both paths are gitignored. Writes use a temp file and rename. Copy those two files for a backup, preferably while the process is stopped. This kit does not ship a second backup copy. If a restore to Discord fails, the snapshot is kept and the next sync tries again. If Discord applied a slowmode change but the response was lost, the saved "previous" value can be wrong; fix that channel by hand after raid mode is off.
+Warnings are stored in `data/warnings.json`. Raid slowmode snapshots are stored in `data/raid-snapshots.json` so a restart can restore the previous slowmode. Set `DATA_DIR` to move both files. The default is `./data` relative to the working directory. Both paths are gitignored. Writes use a temp file and rename. Copy those two files for a backup, preferably while the process is stopped. This kit does not ship a second backup copy. If a restore to Discord fails, the snapshot is kept and the next sync tries again. The pre-raid slowmode is written before Discord is asked to change it. A lost response does not replace that snapshot with the raid slowmode. The next sync retries the change and, when raid mode is turned off, restores the original value.
 
 ## Config fields
 

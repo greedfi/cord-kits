@@ -35,7 +35,11 @@ export function createRuntime({
   now = () => Date.now(),
   log = (message) => console.error(redact(message)),
   acceptLimiter = createRateLimiter({ limit: 3, windowMs: 10_000 }),
+  lock = null,
 }) {
+  function held() {
+    lock?.assertHeld?.()
+  }
   async function channel(guild, id) {
     if (!id) return null
     return guild.channels.cache?.get(id) ?? await guild.channels.fetch(id).catch(() => null)
@@ -59,50 +63,115 @@ export function createRuntime({
     return { assigned: true }
   }
 
+  function ensureGuild(data, guildId) {
+    if (!data.guilds) data.guilds = {}
+    if (!data.guilds[guildId] || typeof data.guilds[guildId] !== 'object') {
+      data.guilds[guildId] = { welcomed: {}, screening: {} }
+    }
+    const guild = data.guilds[guildId]
+    if (!guild.welcomed || typeof guild.welcomed !== 'object') guild.welcomed = {}
+    if (!guild.screening || typeof guild.screening !== 'object') guild.screening = {}
+    return guild
+  }
+
+  function alreadyAnnounced(entry) {
+    if (!entry) return false
+    if (typeof entry === 'number') return true
+    return entry.announced === true
+  }
+
   async function welcome(member) {
+    held()
     const settings = configStore.get().guilds?.[member.guild.id]
     if (!settings?.welcomeChannelId) return { sent: false }
     const decision = await store.update((data) => {
-      if (!data.guilds) data.guilds = {}
-      if (!data.guilds[member.guild.id]) data.guilds[member.guild.id] = { welcomed: {} }
-      const book = data.guilds[member.guild.id].welcomed
-      if (book[member.id]) return { sent: false }
-      book[member.id] = now()
-      return { sent: true }
+      const guild = ensureGuild(data, member.guild.id)
+      const entry = guild.welcomed[member.id]
+      if (alreadyAnnounced(entry) || entry?.inflight) return { send: false }
+      guild.welcomed[member.id] = { at: now(), announced: false, inflight: true }
+      return { send: true }
     })
-    if (!decision.sent) return { sent: false }
-    const destination = await channel(member.guild, settings.welcomeChannelId)
-    if (!destination?.send) return { sent: false }
-    const content = cleanText(renderTemplate(settings.welcomeMessage, {
-      userId: member.id,
-      guildName: member.guild.name,
-      memberCount: member.guild.memberCount,
-    }), 1800)
-    await destination.send({
-      content,
-      allowedMentions: { parse: [], users: [member.id] },
-    })
+    if (!decision.send) return { sent: false }
+    try {
+      const destination = await channel(member.guild, settings.welcomeChannelId)
+      if (!destination?.send) {
+        await store.update((data) => {
+          const entry = ensureGuild(data, member.guild.id).welcomed[member.id]
+          if (entry && typeof entry === 'object') entry.inflight = false
+        })
+        return { sent: false }
+      }
+      const content = cleanText(renderTemplate(settings.welcomeMessage, {
+        userId: member.id,
+        guildName: member.guild.name,
+        memberCount: member.guild.memberCount,
+      }), 1800)
+      await destination.send({
+        content,
+        allowedMentions: { parse: [], users: [member.id] },
+      })
+      await store.update((data) => {
+        const guild = ensureGuild(data, member.guild.id)
+        const entry = guild.welcomed[member.id] ?? { at: now() }
+        entry.announced = true
+        entry.inflight = false
+        guild.welcomed[member.id] = entry
+      })
+    } catch (error) {
+      await store.update((data) => {
+        const entry = ensureGuild(data, member.guild.id).welcomed[member.id]
+        if (entry && typeof entry === 'object') entry.inflight = false
+      }).catch(() => {})
+      throw error
+    }
     const role = await maybeAssign(member.guild, member, settings.autoRoleId)
     return { sent: true, role }
   }
 
+  async function noteScreening(member) {
+    await store.update((data) => {
+      ensureGuild(data, member.guild.id).screening[member.id] = now()
+    })
+  }
+
   async function onJoin(member) {
+    held()
+    if (member?.pending !== false) {
+      await noteScreening(member)
+      return { action: member?.pending === true ? 'screening' : 'unknown' }
+    }
     const decision = joinDecision(member)
     if (decision !== 'welcome') return { action: decision }
     return { action: 'welcome', ...(await welcome(member)) }
   }
 
   async function onUpdate(oldMember, newMember) {
-    if (oldMember?.pending !== true || newMember?.pending !== false) return { action: 'ignore' }
+    held()
+    if (!newMember?.guild) return { action: 'ignore' }
+    if (newMember.pending === true) {
+      await noteScreening(newMember)
+      return { action: 'screening' }
+    }
+    if (newMember.pending !== false) return { action: 'ignore' }
+    const oldPending = oldMember?.pending
+    const screening = (await store.read()).guilds?.[newMember.guild.id]?.screening?.[newMember.id]
+    const finished = oldPending === true || (oldPending == null && Boolean(screening))
+    if (!finished) return { action: 'ignore' }
     if (joinDecision(newMember) !== 'welcome') return { action: 'skip' }
-    return { action: 'screening-finished', ...(await welcome(newMember)) }
+    const result = await welcome(newMember)
+    await store.update((data) => {
+      delete ensureGuild(data, newMember.guild.id).screening[newMember.id]
+    })
+    return { action: 'screening-finished', ...result }
   }
 
   async function onLeave(member) {
+    held()
     const settings = configStore.get().guilds?.[member.guild.id]
     await store.update((data) => {
-      const book = data.guilds?.[member.guild.id]?.welcomed
-      if (book) delete book[member.id]
+      const guild = data.guilds?.[member.guild.id]
+      if (guild?.welcomed) delete guild.welcomed[member.id]
+      if (guild?.screening) delete guild.screening[member.id]
     })
     if (!settings?.leaveChannelId) return { sent: false }
     const destination = await channel(member.guild, settings.leaveChannelId)
@@ -119,6 +188,7 @@ export function createRuntime({
   }
 
   async function accept(interaction) {
+    held()
     if (!acceptLimiter.take(`${interaction.guild.id}:${interaction.user.id}`).allowed) {
       await ephemeral(interaction, 'You are pressing that too quickly. This is not an identity check.')
       return
@@ -150,6 +220,7 @@ export function createRuntime({
 
   async function handleInteraction(interaction) {
     try {
+      held()
       if (interaction.isChatInputCommand?.() && interaction.commandName === 'rules') {
         if (!interaction.inGuild()) {
           await ephemeral(interaction, 'This bot only works in servers.')
@@ -180,6 +251,7 @@ export function createRuntime({
       }
     } catch (error) {
       log(redact(error instanceof Error ? error.message : error))
+      if (error?.code === 'LEASE_LOST') return
       await ephemeral(interaction, 'Command failed.').catch(() => {})
     }
   }
@@ -190,15 +262,9 @@ export function createRuntime({
     onLeave,
     handleInteraction,
     bind(client) {
-      client.on(Events.GuildMemberAdd, (member) => {
-        onJoin(member).catch((error) => log(redact(error.message ?? error)))
-      })
-      client.on(Events.GuildMemberUpdate, (oldMember, newMember) => {
-        onUpdate(oldMember, newMember).catch((error) => log(redact(error.message ?? error)))
-      })
-      client.on(Events.GuildMemberRemove, (member) => {
-        onLeave(member).catch((error) => log(redact(error.message ?? error)))
-      })
+      client.on(Events.GuildMemberAdd, (member) => onJoin(member).catch((error) => log(redact(error.message ?? error))))
+      client.on(Events.GuildMemberUpdate, (oldMember, newMember) => onUpdate(oldMember, newMember).catch((error) => log(redact(error.message ?? error))))
+      client.on(Events.GuildMemberRemove, (member) => onLeave(member).catch((error) => log(redact(error.message ?? error))))
       client.on(Events.InteractionCreate, (interaction) => {
         handleInteraction(interaction).catch((error) => log(redact(error.message ?? error)))
       })

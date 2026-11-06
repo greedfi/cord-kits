@@ -41,7 +41,7 @@ If you will not use rewards, you can remove Manage Roles from the invite. The bo
 
 ## Storage
 
-`levels.json` is in `DATA_DIR` (the image uses `/data`). Mount a volume. Writes are serialized in the process, so concurrent messages do not lose XP. `levels.json.bak` is the previous good write. A corrupt main file is restored from the backup. If both are corrupt, the process refuses to start. Copy both files to back up. Run one replica. Two replicas that do not share the directory will each award XP.
+`levels.json` is in `DATA_DIR` (the image uses `/data`). Mount a volume. Writes are serialized in the process, so concurrent messages do not lose XP. `levels.json.bak` is the previous good write. A corrupt main file is restored from the backup. If both are corrupt, the process refuses to start. Copy both files to back up. Run one process. The file lease is not a distributed lock. Do not run a second replica. Do not put the data directory on network-shared storage. If this process loses the lease, it stops awarding XP and stops changing roles. Two processes with two different data directories will each award XP.
 
 `config.json` reloads from disk. A bad write keeps the last good file. There is no HTTP API. A new image does not replace a customer's files.
 

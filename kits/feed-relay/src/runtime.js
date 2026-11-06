@@ -5,6 +5,7 @@ import {
   HISTORY_PAGES,
   commitSeen,
   entryMarker,
+  feedNonce,
   parseFeed,
   planFailure,
   scanFeedPages,
@@ -38,7 +39,11 @@ export function createRuntime({
   fetchFeed = fetchPublic,
   fetchGuild,
   log = (message) => console.error(redact(message)),
+  lock = null,
 }) {
+  function held() {
+    lock?.assertHeld?.()
+  }
   let bound = null
   let timer = null
   let ticking = false
@@ -54,10 +59,12 @@ export function createRuntime({
   }
 
   async function mark(key, mutator) {
-    await store.update((data) => {
+    return store.update((data) => {
       if (!data.feeds) data.feeds = {}
-      const current = data.feeds[key] ?? { seeded: false, seen: [], failures: 0, nextAttemptAt: 0 }
-      data.feeds[key] = mutator(current)
+      const current = data.feeds[key] ?? { seeded: false, seen: [], failures: 0, nextAttemptAt: 0, inflight: [] }
+      const next = mutator(current)
+      data.feeds[key] = next
+      return next
     })
   }
 
@@ -83,30 +90,56 @@ export function createRuntime({
     return scanFeedPages(pages, { marker, botId })
   }
 
-  async function postEntry(guildId, channelId, entry, marker) {
+  async function postEntry(guildId, channelId, entry, marker, key) {
+    held()
     const guild = await guildOf(guildId)
     if (guild.id !== guildId) throw new Error('Refusing to post outside the configured server.')
     const channel = guild.channels.cache?.get(channelId) ?? await guild.channels.fetch(channelId)
     if ((channel.guildId ?? channel.guild?.id) !== guildId) {
       throw new Error('Refusing to post outside the configured server.')
     }
+    const snapshot = (await store.read()).feeds?.[key]
+    const attempted = (snapshot?.inflight ?? []).includes(entry.id)
     const botId = guild.members?.me?.id ?? guild.client?.user?.id
-    const located = await locatePost(channel, marker, botId)
+    let located = { found: false, complete: false }
+    try {
+      located = await locatePost(channel, marker, botId)
+    } catch (error) {
+      if (attempted) {
+        throw new Error(`Feed history could not be checked after a send attempt: ${error.message}`)
+      }
+    }
     if (located.found) return { duplicate: true }
-    if (!located.complete) {
-      throw new Error('Feed history is incomplete, so this entry was not posted again.')
+    if (attempted && !located.complete) {
+      throw new Error('Feed history is incomplete after a send attempt, so this entry was not posted again.')
+    }
+    if (!attempted) {
+      let claimed = false
+      await mark(key, (state) => {
+        const inflight = state.inflight ?? []
+        if (inflight.includes(entry.id)) return state
+        claimed = true
+        return { ...state, inflight: [...inflight, entry.id].slice(-50) }
+      })
+      if (!claimed) {
+        throw new Error('Feed send was already attempted. Not posting another copy until history shows the result.')
+      }
     }
     const title = cleanText(entry.title || 'Update', 180)
     const link = entry.link ? `\n${entry.link}` : ''
+    held()
     await channel.send({
       content: `${cleanText(`${title}${link}`, 1700)}\n${marker}`,
       allowedMentions: { parse: [] },
+      nonce: feedNonce(marker),
+      enforceNonce: true,
       flags: MessageFlags.SuppressEmbeds,
     })
     return { duplicate: false }
   }
 
   async function pollOne(guildId, feed, allow) {
+    held()
     const key = feedKey(guildId, feed.id)
     const interval = intervalMs()
     if (!allow.has(feed.channelId)) {
@@ -142,11 +175,12 @@ export function createRuntime({
       return
     }
     for (const entry of choice.post) {
-      await postEntry(guildId, feed.channelId, entry, entryMarker(key, entry.id))
+      await postEntry(guildId, feed.channelId, entry, entryMarker(key, entry.id), key)
       await mark(key, (state) => ({
         ...state,
         seeded: true,
         seen: [...(state.seen ?? []), entry.id].slice(-500),
+        inflight: (state.inflight ?? []).filter((id) => id !== entry.id),
         lastError: null,
       }))
     }
@@ -207,6 +241,7 @@ export function createRuntime({
 
   async function handleInteraction(interaction) {
     try {
+      held()
       if (!interaction.isChatInputCommand?.() || interaction.commandName !== 'feed') return
       if (!interaction.inGuild()) {
         await ephemeral(interaction, 'This bot only works in servers.')
@@ -215,6 +250,7 @@ export function createRuntime({
       if (interaction.options.getSubcommand() === 'status') await status(interaction)
     } catch (error) {
       log(redact(error instanceof Error ? error.message : error))
+      if (error?.code === 'LEASE_LOST') return
       await ephemeral(interaction, 'Command failed.').catch(() => {})
     }
   }

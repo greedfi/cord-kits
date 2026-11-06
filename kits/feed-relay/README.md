@@ -8,9 +8,9 @@ Automated tests mock DNS, HTTP, and Discord. They are not live posts. Use the ch
 
 ## Polling, host, and cost
 
-The process has to stay running. It wakes every 30 seconds and fetches a feed only when that feed's `nextAttemptAt` is due. `pollIntervalSeconds` is at least 120 and defaults to 300 in the example, so a feed is not fetched more often than that after a success. A failure backs off from one minute, doubling until one hour, and the cursor is not moved. The first successful fetch records the current entries and posts nothing, so a new feed does not dump its history. Later polls post at most 5 new entries. The rest stay unseen and go out on later polls. Each post ends with a short hash of the feed and entry. Before sending, the bot searches the last 500 messages for its own copy of that hash. Discord has no send idempotency key, so this is not exactly-once: a scan that cannot see the whole recent history does not send again, and two replicas that do not share `DATA_DIR` can both post. A failed send does not mark the entry seen.
+The process has to stay running. It wakes every 30 seconds and fetches a feed only when that feed's `nextAttemptAt` is due. `pollIntervalSeconds` is at least 120 and defaults to 300 in the example, so a feed is not fetched more often than that after a success. A failure backs off from one minute, doubling until one hour, and the cursor is not moved. The first successful fetch records the current entries and posts nothing, so a new feed does not dump its history. Later polls post at most 5 new entries. The rest stay unseen and go out on later polls. Each post ends with a short hash of the feed and entry. A post that has never been attempted is sent even when the latest 500 messages are newer than the entry. The entry id is saved as in-flight before `send`. Discord create-message accepts `nonce` and `enforce_nonce` (discord.js: `nonce` and `enforceNonce`). The same author reusing that nonce within a few minutes gets the existing message back. The window is only those few minutes, so this is not exactly-once delivery. After an attempt, a failed history read or a full 500-message scan that does not contain the hash does not send another copy. A failed send does not mark the entry seen.
 
-This is a Gateway process plus outbound HTTP. It is not deployable to Vercel or another host that suspends the process. Railway bills the always-on container and the egress. Nothing here is guaranteed free. Run one replica against one `DATA_DIR`. Two replicas that do not share that directory can post duplicates.
+This is a Gateway process plus outbound HTTP. It is not deployable to Vercel or another host that suspends the process. Railway bills the always-on container and the egress. Nothing here is guaranteed free. Run one process against one `DATA_DIR`. The file lease is not a distributed lock. Do not run a second replica. Do not put the data directory on network-shared storage. If this process loses the lease, it stops posting. Two processes with two different data directories can both post.
 
 There is no X access and no inherited credential. The only secret is `DISCORD_BOT_TOKEN`.
 
@@ -26,7 +26,7 @@ Feed URLs and every redirect are checked before a connection:
 - redirects are followed by the same function, up to 3 hops
 - blocked ranges include loopback, private, link-local (including `169.254.169.254`), CGNAT `100.64.0.0/10`, multicast, reserved, IPv4-mapped IPv6, unique-local and link-local IPv6, NAT64 `64:ff9b::/96`, 6to4 `2002::/16`, and Teredo `2001:0000::/32`
 
-The config schema only accepts `https://` feed URLs. The fetcher still rejects a redirect onto a private address.
+The config schema only accepts `https://` feed URLs. The fetcher still rejects a redirect onto a private address. Loopback is not on the allowlist. A local-socket test of the HTTP client checks size, timeout, encoding, and redirect status only. Production `fetchPublic` refuses a private address before that client runs, and the lookup callback refuses one again at connect time. That local test is not a live connection to a public host.
 
 ## Intents and permissions
 

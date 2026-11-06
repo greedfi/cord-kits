@@ -129,4 +129,79 @@ describe('welcome runtime', () => {
       dir.remove()
     }
   })
+
+  test('uncached screening completion, duplicates, restart, and a still-pending member', async () => {
+    const dir = tempDir()
+    const sent = []
+    const added = []
+    const roles = new Map([[ROLE, role(ROLE)]])
+    const channel = { id: CHANNEL, async send(payload) { sent.push(payload) } }
+    function person(partial) {
+      const held = new Set()
+      return {
+        id: partial.id ?? USER,
+        pending: partial.pending,
+        user: { bot: false },
+        guild: {
+          id: GUILD,
+          name: 'Test',
+          memberCount: 3,
+          channels: { cache: new Map([[CHANNEL, channel]]), async fetch() { return channel } },
+          members: { me: { permissions: { has: () => true }, roles: { highest: { position: 10 } } } },
+          roles: { async fetch(id) { return roles.get(id) ?? null } },
+        },
+        roles: {
+          cache: held,
+          async add(id) { added.push(id); held.add(id) },
+        },
+      }
+    }
+    const store = createJsonStore(dir.path('welcome.json'))
+    const config = {
+      get: () => ({
+        guilds: {
+          [GUILD]: {
+            welcomeChannelId: CHANNEL,
+            welcomeMessage: 'Welcome {user}.',
+            autoRoleId: ROLE,
+          },
+        },
+      }),
+      onReload() { return () => {} },
+    }
+    const runtime = createRuntime({ configStore: config, store })
+    const client = {
+      handlers: {},
+      on(event, fn) { (this.handlers[event] ??= []).push(fn) },
+      once() {},
+    }
+    runtime.bind(client)
+    try {
+      const pending = person({ pending: true })
+      await client.handlers[Events.GuildMemberAdd][0](pending)
+      assert.equal(sent.length, 0)
+      const saved = await store.read()
+      assert.ok(saved.guilds[GUILD].screening[USER])
+      const cleared = person({ pending: false })
+      await Promise.all([
+        client.handlers[Events.GuildMemberUpdate][0]({}, cleared),
+        client.handlers[Events.GuildMemberUpdate][0](null, cleared),
+      ])
+      assert.equal(sent.length, 1)
+      assert.deepEqual(added, [ROLE])
+      const restarted = createRuntime({ configStore: config, store: createJsonStore(dir.path('welcome.json')) })
+      await restarted.onUpdate({ pending: true }, person({ pending: false }))
+      assert.equal(sent.length, 1)
+      await restarted.onUpdate(undefined, person({ pending: false }))
+      assert.equal(sent.length, 1)
+      const other = person({ id: '888888888888888888', pending: false })
+      await restarted.onUpdate(undefined, other)
+      assert.equal(sent.length, 1)
+      await restarted.onUpdate({ pending: true }, person({ id: '888888888888888888', pending: true }))
+      assert.equal(sent.length, 1)
+      assert.equal(added.length, 1)
+    } finally {
+      dir.remove()
+    }
+  })
 })

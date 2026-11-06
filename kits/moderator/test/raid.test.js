@@ -9,6 +9,7 @@ import {
   joinHoldAction,
   planSlowmodeSync,
   stateAfterApply,
+  stateBeforeUncertainApply,
 } from '../src/raid.js'
 import { tempDir } from './helpers.js'
 
@@ -93,6 +94,44 @@ describe('raid mode', () => {
       enabled: true,
       joinHold: { type: 'off', timeoutMinutes: 5, roleId: null },
     }), { type: 'off' })
+  })
+
+  test('a lost slowmode response keeps the original snapshot across restart', async () => {
+    const dir = tempDir()
+    const filePath = dir.path('raid-snapshots.json')
+    try {
+      const raid = createRaidSync({ filePath })
+      let discordSlowmode = 5
+      const desired = new Map([['channel', 30]])
+      const preview = raid.preview('guild', desired, () => discordSlowmode)
+      const prepared = stateBeforeUncertainApply(new Map(), preview)
+      assert.equal(prepared.get('channel').previous, 5)
+      raid.commit('guild', prepared)
+      discordSlowmode = 30
+      const lost = await applyRaidChanges({
+        prior: prepared,
+        preview,
+        setSlowmode: async () => false,
+      })
+      raid.commit('guild', lost.state)
+      const restarted = createRaidSync({ filePath })
+      const again = restarted.preview('guild', desired, () => discordSlowmode)
+      assert.equal(again.state.get('channel').previous, 5)
+      assert.equal(again.changes[0].slowmodeSeconds, 30)
+      const confirmed = await applyRaidChanges({
+        prior: restarted.state('guild'),
+        preview: again,
+        setSlowmode: async (id, seconds) => {
+          discordSlowmode = seconds
+          return true
+        },
+      })
+      restarted.commit('guild', confirmed.state)
+      const off = restarted.preview('guild', new Map(), () => discordSlowmode)
+      assert.deepEqual(off.changes, [{ id: 'channel', slowmodeSeconds: 5 }])
+    } finally {
+      dir.remove()
+    }
   })
 
   test('a failed restore keeps the previous slowmode for the next attempt', async () => {

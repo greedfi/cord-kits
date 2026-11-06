@@ -47,16 +47,22 @@ export function createRuntime({
   fetchGuild,
   burst = createRateLimiter({ limit: 20, windowMs: 10_000 }),
   log = (message) => console.error(redact(message)),
+  lock = null,
 }) {
+  function held() {
+    lock?.assertHeld?.()
+  }
   let bound = null
 
   async function guildOf(guildId) {
+    held()
     if (fetchGuild) return fetchGuild(guildId)
     if (!bound) throw new Error('Client is not ready.')
     return bound.guilds.fetch(guildId)
   }
 
   async function grant(guildId, userId, roleId) {
+    held()
     const guild = await guildOf(guildId)
     const me = guild.members.me ?? await guild.members.fetchMe()
     const role = await guild.roles.fetch(roleId).catch(() => null)
@@ -102,6 +108,7 @@ export function createRuntime({
   }
 
   async function onMessage(message) {
+    held()
     const settings = message.guild ? guildSettings(configStore.get(), message.guild.id) : null
     const gate = messageGate(message, settings)
     if (gate) return { awarded: false, reason: gate }
@@ -132,6 +139,7 @@ export function createRuntime({
   }
 
   async function reconcile() {
+    held()
     const data = await store.read()
     for (const [guildId, guild] of Object.entries(data.guilds ?? {})) {
       for (const [userId, roleIds] of Object.entries(guild.pending ?? {})) {
@@ -163,6 +171,7 @@ export function createRuntime({
 
   async function handleInteraction(interaction) {
     try {
+      held()
       if (!interaction.isChatInputCommand?.() || !interaction.inGuild()) {
         if (interaction.isChatInputCommand?.()) await ephemeral(interaction, 'This bot only works in servers.')
         return
@@ -171,6 +180,7 @@ export function createRuntime({
       if (interaction.commandName === 'leaderboard') await board(interaction)
     } catch (error) {
       log(redact(error instanceof Error ? error.message : error))
+      if (error?.code === 'LEASE_LOST') return
       await ephemeral(interaction, 'Command failed.').catch(() => {})
     }
   }

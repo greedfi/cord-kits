@@ -152,6 +152,10 @@ function lookupFrom(resolve) {
   }
 }
 
+// The HTTP client used by fetchPublic. Tests may call requestPublic against a local
+// socket to observe timeouts, size caps, and redirect status. That does not add the
+// local address to the allowlist: fetchPublic refuses a private address before this
+// function runs, and the lookup callback refuses one again at connect time.
 function defaultRequest(url, { lookup, timeoutMs, maxBytes }) {
   const lib = url.protocol === 'https:' ? https : http
   return new Promise((resolve, reject) => {
@@ -205,6 +209,10 @@ function defaultRequest(url, { lookup, timeoutMs, maxBytes }) {
     req.on('error', (error) => finish(error))
     req.end()
   })
+}
+
+export function requestPublic(url, options) {
+  return defaultRequest(url, options)
 }
 
 export async function fetchPublic(raw, {

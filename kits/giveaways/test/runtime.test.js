@@ -535,4 +535,119 @@ describe('giveaway runtime', () => {
       box.dir.remove()
     }
   })
+
+  test('a long-lived giveaway still sends its first post in a busy channel', async () => {
+    const box = harness()
+    const id = 'abc123abc123'
+    try {
+      await box.store.update((data) => {
+        data.guilds = {
+          [GUILD]: {
+            [id]: {
+              id,
+              guildId: GUILD,
+              channelId: CHANNEL,
+              messageId: null,
+              prize: 'long',
+              winnerCount: 1,
+              endAt: 1,
+              createdBy: USER,
+              requiredRoleId: null,
+              minAccountAgeMs: 0,
+              entries: [USER],
+              status: 'open',
+              winnerIds: [],
+              announcePending: true,
+              rerolls: [],
+              delivery: 'unsent',
+              createdAt: 0,
+              endedAt: null,
+            },
+          },
+        }
+      })
+      box.history.push(...Array.from({ length: 600 }, (_, index) => ({
+        id: `busy-${index}`,
+        content: 'unrelated',
+        author: { id: '999999999999999999' },
+        createdTimestamp: 50_000,
+      })))
+      await box.runtime.settle(GUILD, id)
+      assert.equal(box.sent.length, 1)
+      assert.equal(box.sent[0].payload.enforceNonce, true)
+      assert.equal(box.sent[0].payload.nonce, `g${id}`)
+      const saved = await box.store.read()
+      assert.deepEqual(saved.guilds[GUILD][id].winnerIds, [USER])
+      assert.equal(saved.guilds[GUILD][id].delivery, 'sent')
+      const winners = [...saved.guilds[GUILD][id].winnerIds]
+      await box.store.update((data) => {
+        data.guilds[GUILD][id].messageId = null
+        data.guilds[GUILD][id].delivery = 'sending'
+        data.guilds[GUILD][id].announcePending = true
+      })
+      box.channel.messages.fetch = async () => {
+        throw new Error('history down')
+      }
+      await assert.rejects(() => box.runtime.settle(GUILD, id), /could not be checked/)
+      assert.equal(box.sent.length, 1)
+      const after = await box.store.read()
+      assert.deepEqual(after.guilds[GUILD][id].winnerIds, winners)
+    } finally {
+      box.runtime.shutdown()
+      box.dir.remove()
+    }
+  })
+
+  test('a lost file lease does not send or edit a giveaway', async () => {
+    const box = harness()
+    const id = 'abc123abc123'
+    try {
+      await box.store.update((data) => {
+        data.guilds = {
+          [GUILD]: {
+            [id]: {
+              id,
+              guildId: GUILD,
+              channelId: CHANNEL,
+              messageId: 'message-9',
+              prize: 'long',
+              winnerCount: 1,
+              endAt: 1,
+              createdBy: USER,
+              requiredRoleId: null,
+              minAccountAgeMs: 0,
+              entries: [USER],
+              status: 'ended',
+              winnerIds: [USER],
+              announcePending: true,
+              rerolls: [],
+              delivery: 'sent',
+              createdAt: 0,
+              endedAt: 1,
+            },
+          },
+        }
+      })
+      const locked = createRuntime({
+        configStore: config(),
+        store: box.store,
+        now: () => 1_000_000,
+        fetchGuild: async () => box.guild,
+        lock: {
+          assertHeld() {
+            const error = new Error('lost')
+            error.code = 'LEASE_LOST'
+            throw error
+          },
+        },
+      })
+      await assert.rejects(() => locked.settle(GUILD, id), (error) => error.code === 'LEASE_LOST')
+      assert.equal(box.sent.length, 0)
+      assert.equal(box.edits.length, 0)
+      locked.shutdown()
+    } finally {
+      box.runtime.shutdown()
+      box.dir.remove()
+    }
+  })
 })

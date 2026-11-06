@@ -70,15 +70,27 @@ export function insertGiveaway(data, input) {
     winnerIds: [],
     announcePending: true,
     rerolls: [],
+    delivery: 'unsent',
     createdAt: input.now,
     endedAt: null,
   }
   return guild[input.id]
 }
 
+export function giveawayNonce(id) {
+  return `g${String(id ?? '')}`.slice(0, 25)
+}
+
 export function rememberMessage(giveaway, messageId) {
   if (giveaway.messageId && giveaway.messageId !== messageId) return false
   giveaway.messageId = messageId
+  giveaway.delivery = 'sent'
+  return true
+}
+
+export function markSending(giveaway) {
+  if (!giveaway || giveaway.messageId || giveaway.delivery === 'sent' || giveaway.delivery === 'sending') return false
+  giveaway.delivery = 'sending'
   return true
 }
 

@@ -15,7 +15,13 @@ import { assessJoinHoldRole, assessJoinHoldTimeout } from './guard.js'
 import { createRateLimiter } from './limits.js'
 import { dataDirectory } from './paths.js'
 import { inviteUrl } from './permissions.js'
-import { applyRaidChanges, createRaidSync, desiredSlowmodes, joinHoldAction } from './raid.js'
+import {
+  applyRaidChanges,
+  createRaidSync,
+  desiredSlowmodes,
+  joinHoldAction,
+  stateBeforeUncertainApply,
+} from './raid.js'
 import { cleanText } from './text.js'
 import { createWarningStore } from './warnings.js'
 
@@ -88,8 +94,10 @@ export async function main() {
     }
     const prior = new Map([...known].map(([id, entry]) => [id, { ...entry }]))
     const preview = raid.preview(guild.id, desired, (id) => previous.get(id) ?? 0)
+    const prepared = stateBeforeUncertainApply(prior, preview)
+    raid.commit(guild.id, prepared)
     const applied = await applyRaidChanges({
-      prior,
+      prior: prepared,
       preview,
       setSlowmode: (id, seconds) => setSlowmode(guild, id, seconds),
     })

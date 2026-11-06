@@ -12,7 +12,7 @@ The draw runs inside this process. It does not use an external scheduler, a Disc
 
 - The process must stay running. A deadline that passes while it is stopped is drawn on the next boot, once.
 - The default check interval is 15 seconds (`schedulerIntervalSeconds`, 5–120). A giveaway can end up to one interval late.
-- Run one replica against one data directory. A lock file rejects a second process on the same machine while the lease is valid. Two machines that do not share the directory can both post.
+- Run one process against one data directory. A file lease rejects a second process on the same directory while the lease is valid. This is not a distributed lock. Do not run a second replica. Do not put the data directory on network-shared storage. If this process loses the lease, it stops sending and stops editing Discord. Two processes with two different data directories can both post.
 - This is a Gateway client. It is not deployable to Vercel or another host that suspends the process. Railway bills the always-on container. Nothing here is free.
 - Idle cost is the running container. The timer does not call Discord until a giveaway is due or its message still needs an update.
 
@@ -43,7 +43,11 @@ https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot%20applicati
 
 At draw time the bot loads each entrant. People who left, bots, accounts younger than the giveaway's minimum age, and people missing `required_role` are not eligible. If the member lookup fails for any other reason, the draw does not happen and the giveaway stays open. Cancel sets no winners. Reroll draws from entrants who did not win. The same interaction id returns the same reroll instead of drawing again.
 
-Winners are written to disk before the message is edited. A repeat of that edit shows the same winners. If the post itself fails, it is retried. Discord has no idempotency key for channel messages, so this is not exactly-once delivery. Each message ends with a stable `gw:<id>` marker. Before sending, the bot reads up to 500 recent messages. If it finds its own marker, it saves that id and edits the message. If the history read fails, or 500 newer messages still do not reach the giveaway's creation time, it does not send another copy and leaves the announcement pending. A deleted message plus a complete scan is posted once more. Two replicas that do not share the data directory can still both send. Run one replica. The draw itself is not repeated.
+Winners are written to disk before the message is edited. A repeat of that edit shows the same winners. The draw itself is not repeated.
+
+Discord's create-message API accepts `nonce` and `enforce_nonce`. discord.js exposes those as `nonce` and `enforceNonce`. If the same bot user sends the same nonce again within a few minutes, Discord returns the existing message instead of creating another. The window is only those few minutes, uniqueness is per author, and deleting the message does not allow that nonce to be reused inside the window. This kit sends a stable nonce derived from the giveaway id. That is short-window retry dedupe. It is not exactly-once delivery over a longer outage.
+
+Each message also ends with a stable `gw:<id>` marker. A send that has never been attempted is posted even when the channel's latest 500 messages are all newer than the giveaway. Immediately before `send`, the giveaway is saved as `sending`. After a restart, a `sending` giveaway is adopted if the marker is in the last 500 messages. If that history read fails, or 500 messages still do not contain the marker, another copy is not sent. A `sending` record whose scan is complete and empty is posted again with the same nonce. A saved message id is edited, not sent again.
 
 ## Setup
 

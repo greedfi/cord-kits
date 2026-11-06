@@ -1,7 +1,8 @@
 // Automated tests with mocked Discord boundaries. These are not live Discord tests.
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { SsrfError, addressBlockReason, fetchPublic, inspectUrl } from '../src/ssrf.js'
+import http from 'node:http'
+import { SsrfError, addressBlockReason, fetchPublic, inspectUrl, requestPublic } from '../src/ssrf.js'
 
 const BLOCKED = [
   '127.0.0.1',
@@ -115,5 +116,68 @@ describe('feed address policy', () => {
       resolve: async () => [{ address: '1.1.1.1', family: 4 }],
       request: async () => ({ status: 200, headers: { 'content-encoding': 'gzip' }, body: 'not-xml' }),
     }), /Compressed/)
+  })
+
+  test('the real HTTP client caps bytes and timeouts, and production fetch never connects to loopback', async () => {
+    let hits = 0
+    const server = http.createServer((req, res) => {
+      hits += 1
+      if (req.url === '/slow') return
+      if (req.url === '/redir') {
+        res.writeHead(302, { location: `http://127.0.0.1:${server.address().port}/secret` })
+        res.end()
+        return
+      }
+      if (req.url === '/zip') {
+        res.setHeader('content-encoding', 'gzip')
+        res.end('not-xml')
+        return
+      }
+      res.end('x'.repeat(80))
+    })
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = server.address().port
+    const lookup = (_hostname, options, callback) => {
+      const done = typeof options === 'function' ? options : callback
+      done(null, '127.0.0.1', 4)
+    }
+    try {
+      await assert.rejects(
+        () => requestPublic(new URL(`http://127.0.0.1:${port}/big`), { lookup, timeoutMs: 1000, maxBytes: 20 }),
+        /too large/,
+      )
+      await assert.rejects(
+        () => requestPublic(new URL(`http://127.0.0.1:${port}/slow`), { lookup, timeoutMs: 200, maxBytes: 1000 }),
+        /timed out/,
+      )
+      await assert.rejects(
+        () => requestPublic(new URL(`http://127.0.0.1:${port}/zip`), { lookup, timeoutMs: 1000, maxBytes: 1000 }),
+        /Compressed/,
+      )
+      const redirect = await requestPublic(new URL(`http://127.0.0.1:${port}/redir`), {
+        lookup,
+        timeoutMs: 1000,
+        maxBytes: 1000,
+      })
+      assert.equal(redirect.status, 302)
+      assert.match(String(redirect.headers.location), /\/secret$/)
+      const before = hits
+      await assert.rejects(() => fetchPublic(`http://127.0.0.1:${port}/big`, { timeoutMs: 1000 }), SsrfError)
+      assert.equal(hits, before)
+      let lookups = 0
+      await assert.rejects(() => fetchPublic('http://example.com/feed', {
+        timeoutMs: 1000,
+        resolve: async () => {
+          lookups += 1
+          return lookups === 1
+            ? [{ address: '1.1.1.1', family: 4 }]
+            : [{ address: '127.0.0.1', family: 4 }]
+        },
+      }), (error) => error instanceof SsrfError || /not allowed/i.test(error.message))
+      assert.equal(hits, before)
+      assert.ok(lookups >= 2)
+    } finally {
+      server.close()
+    }
   })
 })

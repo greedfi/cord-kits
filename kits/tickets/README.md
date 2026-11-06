@@ -25,7 +25,7 @@ This is not a thread. The invite does not include Create Private Threads or Send
 
 Transcripts are off unless `transcripts` is true. When they are on, only a member of the configured staff role can confirm the close. The bot fetches up to 100 messages with the HTTP API and writes `DATA_DIR/transcripts/<guild>/<ticket>.txt` with mode `0600`. It does not post the file in a channel. `/ticket transcript` replies ephemerally and checks the staff role again. A server administrator who does not have that role is refused. The opener is refused.
 
-The Message Content privileged intent is **not** enabled. Gateway message events are not read. The HTTP fetch is what currently returns message text for a bot with Read Message History. If that text is missing, the line is stored as `[no content]`. This kit does not promise to read messages it was not given. If writing the transcript fails, the channel is not deleted.
+The Message Content privileged intent is **not** enabled. Gateway message events are not read. The HTTP fetch is what currently returns message text for a bot with Read Message History. This is not a complete text transcript: it keeps at most 100 messages, and a message with no content is stored as `[no content]`. Attachment URLs are not copied; the line only notes how many attachments were omitted. If writing the transcript fails, the channel is not deleted.
 
 ## Intents and permissions
 
@@ -63,7 +63,7 @@ npm run register
 npm start
 ```
 
-The image sets `DATA_DIR=/data` and `CONFIG_PATH=/data/config.json`. Mount a volume there. `tickets.json` is the state, with `tickets.json.bak` as the previous good write. A corrupt main file is restored from the backup. If both are corrupt, the process refuses to start. Copy both files, and the `transcripts/` directory, to back up. Run one replica.
+The image sets `DATA_DIR=/data` and `CONFIG_PATH=/data/config.json`. Mount a volume there. `tickets.json` is the state, with `tickets.json.bak` as the previous good write. A corrupt main file is restored from the backup. If both are corrupt, the process refuses to start. Copy both files, and the `transcripts/` directory, to back up. Run one process. The file lease is not a distributed lock. Do not run a second replica. Do not put the data directory on network-shared storage. If this process loses the lease, it stops creating, editing, and deleting channels.
 
 `config.json` reloads from disk. A bad write keeps the last good file. Changing it is a host change. There is no HTTP API. A new image does not replace a customer's config or data.
 
