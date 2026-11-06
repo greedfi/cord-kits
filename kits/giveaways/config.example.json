@@ -1,0 +1,13 @@
+{
+  "schedulerIntervalSeconds": 15,
+  "maxWinners": 10,
+  "maxDurationMinutes": 10080,
+  "minAccountAgeHours": 0,
+  "guilds": {
+    "111111111111111111": {
+      "managerRoleId": null,
+      "maxWinners": 3,
+      "minAccountAgeHours": 24
+    }
+  }
+}

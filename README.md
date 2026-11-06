@@ -6,6 +6,7 @@ Tested discord.js v14 starter kits for .cord. Each kit lives in its own folder, 
 | --- | --- |
 | Music | [kits/music](kits/music) |
 | Moderator | [kits/moderator](kits/moderator) |
+| Giveaways | [kits/giveaways](kits/giveaways) |
 
 Neither invite asks for Administrator.
 
@@ -35,6 +36,20 @@ https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot%20applicati
 
 Manage Channels is there so raid mode can set slowmode. Manage Roles is there so raid mode can assign a join-hold role. That assignment is refused for `@everyone`, managed roles, and elevated roles, and raid mode does not edit channel overwrites. Moderate Members covers timeouts, including the join hold, and only when the member is moderatable.
 
+## Giveaways
+
+Intents: `Guilds`. It is not privileged.
+
+Permissions: View Channel, Send Messages, Embed Links, Read Message History.
+
+Permission integer: **84992**
+
+```
+https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot%20applications.commands&permissions=84992
+```
+
+The process ends giveaways itself. It does not use another bot's scheduler. It has to stay running, and a stopped process draws overdue giveaways once when it starts. See [kits/giveaways](kits/giveaways) for the interval, the single-replica lock, and the data files.
+
 ## Setup
 
 Each kit has its own `package.json`.
@@ -54,11 +69,12 @@ Secrets stay in the environment: `DISCORD_BOT_TOKEN`, `CLIENT_ID`, and optional 
 
 ## Tests
 
-GitHub Actions runs lint and `node --test` on Node.js 22 for both kits.
+GitHub Actions runs lint and `node --test` on Node.js 22. The workflow list grows as kits are added; run the kit command above for any kit that is not on that list yet.
 
 ```bash
 cd kits/music && npm ci && npm run lint && npm test
 cd kits/moderator && npm ci && npm run lint && npm test
+cd kits/giveaways && npm ci && npm run lint && npm test
 ```
 
 ## Hosting
