@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/greedfi/cord-kits/blob/main/kits/leveling/config.schema.json",
+  "title": "Leveling kit config",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["xpPerMessage", "cooldownSeconds", "guilds"],
+  "properties": {
+    "xpPerMessage": { "type": "integer", "minimum": 1, "maximum": 50 },
+    "cooldownSeconds": { "type": "integer", "minimum": 0, "maximum": 3600 },
+    "guilds": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[0-9]{17,20}$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "xpPerMessage": { "type": "integer", "minimum": 1, "maximum": 50 },
+          "cooldownSeconds": { "type": "integer", "minimum": 0, "maximum": 3600 },
+          "excludedChannelIds": {
+            "type": "array",
+            "uniqueItems": true,
+            "maxItems": 100,
+            "items": { "type": "string", "pattern": "^[0-9]{17,20}$" }
+          },
+          "excludedRoleIds": {
+            "type": "array",
+            "uniqueItems": true,
+            "maxItems": 50,
+            "items": { "type": "string", "pattern": "^[0-9]{17,20}$" }
+          },
+          "rewards": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["level", "roleId"],
+              "properties": {
+                "level": { "type": "integer", "minimum": 1, "maximum": 200 },
+                "roleId": { "type": "string", "pattern": "^[0-9]{17,20}$" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

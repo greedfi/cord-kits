@@ -11,8 +11,9 @@ Tested discord.js v14 starter kits for .cord. Each kit lives in its own folder, 
 | Feed relay | [kits/feed-relay](kits/feed-relay) |
 | Tickets | [kits/tickets](kits/tickets) |
 | Welcome | [kits/welcome](kits/welcome) |
+| Leveling | [kits/leveling](kits/leveling) |
 
-Neither invite asks for Administrator.
+No kit invite asks for Administrator.
 
 ## Music
 
@@ -110,12 +111,26 @@ https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot%20applicati
 
 Join and leave messages, an optional non-privileged role, and a rules button. The button is not identity verification and does not bypass Discord membership screening. See [kits/welcome](kits/welcome).
 
+## Leveling
+
+Intents: `Guilds`, `GuildMessages`. Message Content is not requested. The bot counts messages and does not read their text.
+
+Permissions: View Channel, Send Messages, Manage Roles.
+
+Permission integer: **268438528**
+
+```
+https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot%20applications.commands&permissions=268438528
+```
+
+XP is stored per server. Level `n` requires `50 * n * (n + 1)` XP. Role rewards are refused when the role is elevated. See [kits/leveling](kits/leveling).
+
 ## Setup
 
 Each kit has its own `package.json`.
 
 ```bash
-cd kits/music   # or kits/moderator
+cd kits/music   # or any other kit directory
 npm install
 cp .env.example .env
 cp config.example.json config.json
@@ -129,7 +144,7 @@ Secrets stay in the environment: `DISCORD_BOT_TOKEN`, `CLIENT_ID`, and optional 
 
 ## Tests
 
-GitHub Actions runs lint and `node --test` on Node.js 22. The workflow list grows as kits are added; run the kit command above for any kit that is not on that list yet.
+GitHub Actions runs lint and `node --test` on Node.js 22 for every kit. These are automated tests with mocked Discord boundaries. They are not live Discord tests.
 
 ```bash
 cd kits/music && npm ci && npm run lint && npm test
@@ -139,15 +154,16 @@ cd kits/reaction-roles && npm ci && npm run lint && npm test
 cd kits/feed-relay && npm ci && npm run lint && npm test
 cd kits/tickets && npm ci && npm run lint && npm test
 cd kits/welcome && npm ci && npm run lint && npm test
+cd kits/leveling && npm ci && npm run lint && npm test
 ```
 
 ## Hosting
 
-Each kit has a `Dockerfile` based on `node:22-slim`. The build exits if that image is older than Node.js 22.12.0. The music image also installs ffmpeg. `railway.json` sets `restartPolicyType` to `ALWAYS` so the process comes back if it exits. Set the Railway service root to the kit directory (`kits/music` or `kits/moderator`), set the token and client id as variables, and provide `config.json` at `/app/config.json` or via `CONFIG_PATH`.
+Each kit has a `Dockerfile` based on `node:22-slim`. The build exits if that image is older than Node.js 22.12.0. The music image also installs ffmpeg. `railway.json` sets `restartPolicyType` to `ALWAYS` so the process comes back if it exits. Set the Railway service root to that kit's directory. Music and moderator read `config.json` from `/app/config.json` or `CONFIG_PATH`, and they write `data/` (or `DATA_DIR`) next to the process. The other images set `DATA_DIR=/data` and `CONFIG_PATH=/data/config.json`. Mount a volume on that path. Without the volume, giveaways, panels, feed cursors, tickets, welcome records, XP, warnings, and raid snapshots disappear when the container is replaced.
 
-These kits log in to the Discord Gateway and keep running. They are not deployable to Vercel or other serverless platforms. A host that suspends the process will miss voice, filters, and raid sync. Railway (or any similar container host) bills for the always-on service. This repository does not promise free hosting.
+These kits log in to the Discord Gateway and keep running. They are not deployable to Vercel or other serverless platforms. A host that suspends the process misses voice, filters, raid sync, giveaway deadlines, feed polls, welcomes, and XP. Railway (or any similar container host) bills for the always-on service. This repository does not promise free hosting.
 
-`config.json` is read from disk and reloaded in the process. It is not a remote API. Changing it for a running bot takes access to that host's file (or another change the host operator approves). There is no unauthenticated management port. A new image does not overwrite a customer's `config.json` or `data/` directory.
+`config.json` is read from disk and reloaded in the process. It is not a remote API. Changing it for a running bot takes access to that host's file, or another change the host operator approves. There is no unauthenticated management port. A new image does not overwrite a customer's `config.json` or data files. This repository does not push updates into copies that customers already run.
 
 ## Releases
 
@@ -171,7 +187,7 @@ A release is pinned by a git tag plus the sha256 of the GitHub tag archive. This
    sha256sum cord-kits-v0.1.0.tar.gz
    ```
 
-The `v0.1.0` checksum is written down after that tag exists. Until then, the pin is the tag name together with that archive URL.
+The `v0.1.0` checksum is written down after that tag exists. Until then, the pin is the tag name together with that archive URL. This tree does not move that tag. Kits added after the tagged commit are not part of `v0.1.0`.
 
 | Tag | Archive | sha256 |
 | --- | --- | --- |

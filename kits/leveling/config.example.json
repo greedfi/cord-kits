@@ -1,0 +1,13 @@
+{
+  "xpPerMessage": 15,
+  "cooldownSeconds": 60,
+  "guilds": {
+    "111111111111111111": {
+      "xpPerMessage": 15,
+      "cooldownSeconds": 60,
+      "excludedChannelIds": [],
+      "excludedRoleIds": [],
+      "rewards": []
+    }
+  }
+}
