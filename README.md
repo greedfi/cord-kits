@@ -9,6 +9,7 @@ Tested discord.js v14 starter kits for .cord. Each kit lives in its own folder, 
 | Giveaways | [kits/giveaways](kits/giveaways) |
 | Reaction roles | [kits/reaction-roles](kits/reaction-roles) |
 | Feed relay | [kits/feed-relay](kits/feed-relay) |
+| Tickets | [kits/tickets](kits/tickets) |
 
 Neither invite asks for Administrator.
 
@@ -80,6 +81,20 @@ https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot%20applicati
 
 RSS and Atom only, including a YouTube channel's public Atom URL. No X credential and no YouTube API key. Feed URLs and redirects are checked for SSRF, including private, link-local, mapped IPv6, and a second DNS lookup at connect time. The process has to stay running. See [kits/feed-relay](kits/feed-relay).
 
+## Tickets
+
+Intents: `Guilds`. It is not privileged. Message Content is not requested.
+
+Permissions: Manage Channels, View Channel, Send Messages, Manage Messages, Attach Files, Read Message History.
+
+Permission integer: **109584**
+
+```
+https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot%20applications.commands&permissions=109584
+```
+
+This kit opens a private channel, not a thread. @everyone cannot view it. A Discord administrator still can. Transcripts, when enabled, are a staff-role file, not a public channel. See [kits/tickets](kits/tickets).
+
 ## Setup
 
 Each kit has its own `package.json`.
@@ -107,6 +122,7 @@ cd kits/moderator && npm ci && npm run lint && npm test
 cd kits/giveaways && npm ci && npm run lint && npm test
 cd kits/reaction-roles && npm ci && npm run lint && npm test
 cd kits/feed-relay && npm ci && npm run lint && npm test
+cd kits/tickets && npm ci && npm run lint && npm test
 ```
 
 ## Hosting
