@@ -7,6 +7,7 @@ Tested discord.js v14 starter kits for .cord. Each kit lives in its own folder, 
 | Music | [kits/music](kits/music) |
 | Moderator | [kits/moderator](kits/moderator) |
 | Giveaways | [kits/giveaways](kits/giveaways) |
+| Reaction roles | [kits/reaction-roles](kits/reaction-roles) |
 
 Neither invite asks for Administrator.
 
@@ -50,6 +51,20 @@ https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot%20applicati
 
 The process ends giveaways itself. It does not use another bot's scheduler. It has to stay running, and a stopped process draws overdue giveaways once when it starts. See [kits/giveaways](kits/giveaways) for the interval, the single-replica lock, and the data files.
 
+## Reaction roles
+
+Intents: `Guilds`. It is not privileged.
+
+Permissions: View Channel, Send Messages, Read Message History, Manage Roles.
+
+Permission integer: **268504064**
+
+```
+https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot%20applications.commands&permissions=268504064
+```
+
+Button and select panels only. This is not an emoji reaction role. The bot refuses admin, moderator, managed, and elevated roles, and it checks the role hierarchy on every click. See [kits/reaction-roles](kits/reaction-roles).
+
 ## Setup
 
 Each kit has its own `package.json`.
@@ -75,6 +90,7 @@ GitHub Actions runs lint and `node --test` on Node.js 22. The workflow list grow
 cd kits/music && npm ci && npm run lint && npm test
 cd kits/moderator && npm ci && npm run lint && npm test
 cd kits/giveaways && npm ci && npm run lint && npm test
+cd kits/reaction-roles && npm ci && npm run lint && npm test
 ```
 
 ## Hosting

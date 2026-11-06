@@ -1,0 +1,25 @@
+{
+  "name": "cord-kits-reaction-roles",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Discord reaction-role starter kit using buttons and select menus, with hierarchy and elevated-role checks.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "register": "node src/register.js",
+    "lint": "eslint .",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "discord.js": "^14.28.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "eslint": "^9.39.1",
+    "globals": "^15.15.0"
+  }
+}

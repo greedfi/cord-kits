@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/greedfi/cord-kits/blob/main/kits/reaction-roles/config.schema.json",
+  "title": "Reaction roles kit config",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["maxOptions", "guilds"],
+  "properties": {
+    "maxOptions": { "type": "integer", "minimum": 1, "maximum": 25 },
+    "guilds": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[0-9]{17,20}$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "managerRoleId": {
+            "oneOf": [
+              { "type": "string", "pattern": "^[0-9]{17,20}$" },
+              { "type": "null" }
+            ]
+          },
+          "maxOptions": { "type": "integer", "minimum": 1, "maximum": 25 }
+        }
+      }
+    }
+  }
+}
