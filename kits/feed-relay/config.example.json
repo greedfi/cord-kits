@@ -1,0 +1,15 @@
+{
+  "pollIntervalSeconds": 300,
+  "guilds": {
+    "111111111111111111": {
+      "destinations": ["222222222222222222"],
+      "feeds": [
+        {
+          "id": "news",
+          "url": "https://example.com/feed.xml",
+          "channelId": "222222222222222222"
+        }
+      ]
+    }
+  }
+}

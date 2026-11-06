@@ -8,6 +8,7 @@ Tested discord.js v14 starter kits for .cord. Each kit lives in its own folder, 
 | Moderator | [kits/moderator](kits/moderator) |
 | Giveaways | [kits/giveaways](kits/giveaways) |
 | Reaction roles | [kits/reaction-roles](kits/reaction-roles) |
+| Feed relay | [kits/feed-relay](kits/feed-relay) |
 
 Neither invite asks for Administrator.
 
@@ -65,6 +66,20 @@ https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot%20applicati
 
 Button and select panels only. This is not an emoji reaction role. The bot refuses admin, moderator, managed, and elevated roles, and it checks the role hierarchy on every click. See [kits/reaction-roles](kits/reaction-roles).
 
+## Feed relay
+
+Intents: `Guilds`. It is not privileged.
+
+Permissions: View Channel, Send Messages.
+
+Permission integer: **3072**
+
+```
+https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot%20applications.commands&permissions=3072
+```
+
+RSS and Atom only, including a YouTube channel's public Atom URL. No X credential and no YouTube API key. Feed URLs and redirects are checked for SSRF, including private, link-local, mapped IPv6, and a second DNS lookup at connect time. The process has to stay running. See [kits/feed-relay](kits/feed-relay).
+
 ## Setup
 
 Each kit has its own `package.json`.
@@ -91,6 +106,7 @@ cd kits/music && npm ci && npm run lint && npm test
 cd kits/moderator && npm ci && npm run lint && npm test
 cd kits/giveaways && npm ci && npm run lint && npm test
 cd kits/reaction-roles && npm ci && npm run lint && npm test
+cd kits/feed-relay && npm ci && npm run lint && npm test
 ```
 
 ## Hosting
