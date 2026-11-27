@@ -123,7 +123,7 @@ export function finishCurrent(state, { natural }) {
       autoplay: false,
     }
   }
-  if (natural && state.loop === 'queue') {
+  if (natural && state.loop === 'queue' && !state.current.failed) {
     const rotated = promote({
       ...state,
       tracks: [...state.tracks, state.current],
@@ -144,15 +144,12 @@ export function finishCurrent(state, { natural }) {
   }
 }
 
-export function skip(state) {
-  return promote({ ...state, current: null })
-}
-
-export function back(state) {
+export function back(state, maxSize = Number.POSITIVE_INFINITY) {
   if (state.history.length === 0) return { ok: false, error: 'no_history', state }
   const track = state.history[state.history.length - 1]
   const history = state.history.slice(0, -1)
   const tracks = state.current ? [state.current, ...state.tracks] : state.tracks.slice()
+  if (tracks.length > maxSize) return { ok: false, error: 'queue_full', state }
   return {
     ok: true,
     track,
@@ -244,23 +241,6 @@ export function parseClock(value) {
   const [hours, minutes, seconds] = parts
   if (hours > 24 || minutes > 59 || seconds > 59) return null
   return (hours * 3600 + minutes * 60 + seconds) * 1000
-}
-
-export function createGuildQueues(defaultVolume = 50) {
-  const queues = new Map()
-  return {
-    get(guildId) {
-      if (!queues.has(guildId)) queues.set(guildId, createQueueState(defaultVolume))
-      return queues.get(guildId)
-    },
-    set(guildId, state) {
-      queues.set(guildId, state)
-      return state
-    },
-    has(guildId) {
-      return queues.has(guildId)
-    },
-  }
 }
 
 export function formatQueue(state, { limit = 10 } = {}) {

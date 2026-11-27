@@ -1,5 +1,5 @@
 import { ChannelType, PermissionFlagsBits, SlashCommandBuilder } from 'discord.js'
-import { CONFIG_COMMANDS, CONTROL_COMMANDS, LOOP_MODES, OPEN_COMMANDS } from './catalog.js'
+import { CONTROL_COMMANDS, LOOP_MODES } from './catalog.js'
 
 const connect = PermissionFlagsBits.Connect
 const manage = PermissionFlagsBits.ManageGuild
@@ -186,5 +186,3 @@ export const commands = [
 export function commandData() {
   return commands.map((entry) => entry.toJSON())
 }
-
-export const commandNames = [...CONTROL_COMMANDS, ...CONFIG_COMMANDS, ...OPEN_COMMANDS]

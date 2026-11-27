@@ -15,9 +15,10 @@ const NEEDS_SAME_VOICE = new Set([
   'pause', 'resume', 'skip', 'back', 'replay', 'stop', 'loop', 'shuffle', 'move',
   'remove', 'clear', 'seek', 'forward', 'rewind', 'volume', 'leave', 'sleep',
 ])
-const SLOW = new Set([
-  'play', 'playskip', 'playtop', 'search', 'skip', 'back', 'replay', 'seek',
-  'forward', 'rewind', 'filter', 'join', 'playlist',
+const LOCKED = new Set([
+  'play', 'playskip', 'playtop', 'search', 'pause', 'resume', 'skip', 'back',
+  'replay', 'stop', 'loop', 'shuffle', 'move', 'remove', 'clear', 'seek',
+  'forward', 'rewind', 'volume', 'join', 'leave', 'sleep', 'filter', 'playlist',
 ])
 const PLACEMENTS = { play: 'end', playskip: 'skip', playtop: 'top' }
 const PLAYLIST_ERRORS = {
@@ -326,7 +327,7 @@ export function createApp(deps) {
     const { commandName } = interaction
     const guildId = interaction.guildId
     const settings = settingsFor(guildId)
-    if (SLOW.has(commandName) && commandName !== 'playlist' && !interaction.deferred) {
+    if (LOCKED.has(commandName) && commandName !== 'playlist' && !interaction.deferred && !interaction.replied) {
       await interaction.deferReply(commandName === 'search' ? { flags: MessageFlags.Ephemeral } : undefined)
     }
     if (PLACEMENTS[commandName]) {
@@ -733,14 +734,29 @@ export function createApp(deps) {
         channelId: interaction.channelId,
         requestChannelActive: Boolean(deps.requestChannel),
       })
-      if (denial) {
-        await finish(interaction, denial)
+      const playDenial = voiceCommand === 'play' && interaction.commandName !== 'play'
+        ? authorize({
+          commandName: 'play',
+          settings,
+          member: interaction.member,
+          channelId: interaction.channelId,
+          requestChannelActive: Boolean(deps.requestChannel),
+        })
+        : null
+      if (denial || playDenial) {
+        await finish(interaction, denial || playDenial)
         return
       }
       const voiceDenial = checkVoice(voiceCommand, interaction, settings)
       if (voiceDenial) {
         await finish(interaction, voiceDenial)
         return
+      }
+      if (LOCKED.has(interaction.commandName) && !interaction.deferred && !interaction.replied) {
+        const sub = interaction.commandName === 'playlist' ? interaction.options.getSubcommand(false) : null
+        const hidden = interaction.commandName === 'search'
+          || (interaction.commandName === 'playlist' && sub !== 'play')
+        await interaction.deferReply(hidden ? { flags: MessageFlags.Ephemeral } : undefined)
       }
       await runCommand(interaction)
     } catch (error) {

@@ -234,6 +234,60 @@ describe('SoundCloud parsing', () => {
     ], { current, queued: [], recent: recent.slice(0, 1) }).url, 'https://soundcloud.com/a/fresh')
   })
 
+  test('shares one in-flight discovery and aborts each fetch', async () => {
+    clearClientIdCache()
+    let homes = 0
+    let release
+    const gate = new Promise((resolve) => { release = resolve })
+    const fetchImpl = async (url, options) => {
+      assert.equal(typeof options.signal.throwIfAborted, 'function')
+      if (String(url) === 'https://soundcloud.com/') {
+        homes += 1
+        await gate
+        return jsonResponse('<script src="https://a-v2.sndcdn.com/assets/app.js"></script>')
+      }
+      return jsonResponse(`client_id:"${clientId}"`)
+    }
+    const first = discoverClientId(fetchImpl)
+    const second = discoverClientId(fetchImpl)
+    assert.equal(homes, 1)
+    release()
+    const [found, again] = await Promise.all([first, second])
+    assert.equal(found, clientId)
+    assert.equal(again, clientId)
+    assert.equal(homes, 1)
+    clearClientIdCache()
+  })
+
+  test('stops reading a discovery body once it hits the cap', async () => {
+    clearClientIdCache()
+    const reads = []
+    const fetchImpl = async (url) => {
+      if (String(url) !== 'https://soundcloud.com/') return jsonResponse('no')
+      return {
+        ok: true,
+        status: 200,
+        body: {
+          getReader() {
+            return {
+              async read() {
+                reads.push('chunk')
+                return { done: false, value: new TextEncoder().encode('x'.repeat(50)) }
+              },
+              async cancel() {
+                reads.push('cancel')
+              },
+            }
+          },
+        },
+      }
+    }
+    assert.equal(await discoverClientId(fetchImpl, { maxHtmlChars: 20 }), null)
+    assert.equal(reads.includes('cancel'), true)
+    assert.ok(reads.filter((item) => item === 'chunk').length < 5)
+    clearClientIdCache()
+  })
+
   test('rejects a YouTube URL returned as a stream', async () => {
     const fetchImpl = async (url) => {
       if (String(url).includes('/resolve')) {

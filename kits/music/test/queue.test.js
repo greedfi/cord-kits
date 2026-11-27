@@ -2,7 +2,6 @@ import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   back,
-  createGuildQueues,
   createQueueState,
   enqueue,
   enqueueMany,
@@ -17,7 +16,6 @@ import {
   seekTo,
   setVolume,
   shuffleTracks,
-  skip,
   stop,
 } from '../src/queue.js'
 
@@ -36,11 +34,11 @@ describe('queue', () => {
     assert.deepEqual(started.state.tracks.map((item) => item.title), ['B'])
     assert.equal(second.state.tracks.length, 2)
 
-    const skipped = skip(started.state)
+    const skipped = finishCurrent(started.state, { natural: false })
     assert.equal(skipped.track.title, 'B')
     assert.equal(skipped.state.tracks.length, 0)
 
-    const ended = skip(skipped.state)
+    const ended = finishCurrent(skipped.state, { natural: false })
     assert.equal(ended.track, null)
     assert.equal(ended.state.current, null)
 
@@ -77,14 +75,6 @@ describe('queue', () => {
     for (const value of [-1, 101, 1.5, Number.NaN]) {
       assert.throws(() => setVolume(createQueueState(), value), RangeError)
     }
-  })
-
-  test('guild queues do not share tracks', () => {
-    const queues = createGuildQueues(30)
-    queues.set('111111111111111111', enqueue(queues.get('111111111111111111'), track('a'), 5).state)
-    assert.equal(queues.get('222222222222222222').tracks.length, 0)
-    assert.equal(queues.get('222222222222222222').volume, 30)
-    assert.equal(queues.get('111111111111111111').tracks.length, 1)
   })
 
   test('formatQueue lists the current track and caps the waiting list', () => {
@@ -136,6 +126,17 @@ describe('queue', () => {
     const empty = back(createQueueState())
     assert.equal(empty.ok, false)
     assert.equal(empty.state.history.length, 0)
+    const full = {
+      ...createQueueState(),
+      current: track('now', 'Now'),
+      tracks: [track('a', 'A')],
+      history: [track('old', 'Old')],
+    }
+    const blocked = back(full, 1)
+    assert.equal(blocked.ok, false)
+    assert.equal(blocked.error, 'queue_full')
+    assert.equal(blocked.state.tracks.length, 1)
+    assert.equal(back(full, 2).ok, true)
 
     const waiting = [track('a', 'A'), track('b', 'B'), track('c', 'C')]
     assert.deepEqual(moveTrack(waiting, 1, 1).tracks.map((item) => item.title), ['A', 'B', 'C'])

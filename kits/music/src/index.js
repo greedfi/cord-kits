@@ -5,7 +5,7 @@ import { generateDependencyReport } from '@discordjs/voice'
 import { Client, Events } from 'discord.js'
 import { configFilePath, createConfigStore, createLogger, loadSchema } from './config.js'
 import { isDirectRun, loadEnv, redact, requestChannelEnabled, requireEnv } from './env.js'
-import { gatewayIntents, inviteUrl } from './permissions.js'
+import { REQUEST_CHANNEL_PERMISSIONS, gatewayIntents, inviteUrl } from './permissions.js'
 import { attachClient, createRuntime } from './runtime.js'
 
 const kitRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -32,7 +32,10 @@ export async function main() {
   client.once(Events.ClientReady, (ready) => {
     console.log(`Logged in as ${ready.user.tag}`)
     const clientId = process.env.CLIENT_ID?.trim()
-    if (clientId) console.log(`Invite: ${inviteUrl(clientId)}`)
+    if (clientId) {
+      const permissions = requestChannel ? REQUEST_CHANNEL_PERMISSIONS : undefined
+      console.log(`Invite: ${inviteUrl(clientId, permissions)}`)
+    }
     runtime.restore().catch((error) => {
       console.error(redact(error instanceof Error ? error.message : error))
     })

@@ -6,7 +6,6 @@ import {
   PROGRESS_INTERVAL_MS,
   editDecision,
   nowPlayingPayload,
-  payloadLength,
   progressLine,
   searchMenu,
 } from '../src/nowplaying.js'
@@ -33,10 +32,11 @@ describe('now playing', () => {
   test('stays inside Discord embed and component limits', () => {
     const payload = nowPlayingPayload(snapshot, 0)
     const embed = payload.embeds[0].toJSON()
+    const fieldLength = embed.fields.reduce((sum, field) => sum + field.name.length + field.value.length, 0)
     assert.ok(embed.title.length <= 256)
     assert.ok(embed.description.length <= 4096)
     assert.equal(embed.fields.length <= 25, true)
-    assert.equal(payloadLength(payload) <= 6000, true)
+    assert.equal(embed.title.length + embed.description.length + fieldLength <= 6000, true)
     assert.equal(embed.description.includes('@'), false)
     assert.equal(payload.components.length <= 5, true)
     for (const row of payload.components) {

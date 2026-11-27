@@ -1,3 +1,4 @@
+import { promises as dns } from 'node:dns'
 import { isIP } from 'node:net'
 
 export class SourceError extends Error {
@@ -118,10 +119,22 @@ function looksLikeRadio(url, ext) {
     || path.includes('shoutcast')
 }
 
+function safeDecode(value) {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
 function titleFromUrl(url) {
-  const base = decodeURIComponent(url.pathname.split('/').filter(Boolean).pop() ?? '')
+  const base = safeDecode(url.pathname.split('/').filter(Boolean).pop() ?? '')
   const stripped = base.replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ').trim()
   return stripped || url.hostname
+}
+
+function looksLikeUrl(value) {
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(value) || /^spotify:/i.test(value)
 }
 
 export function assertPublicHttpUrl(raw) {
@@ -152,6 +165,58 @@ export function assertPublicHttpUrl(raw) {
   return url
 }
 
+async function defaultLookup(hostname, options) {
+  return dns.lookup(hostname, options)
+}
+
+export async function assertResolvedPublicUrl(raw, lookup = defaultLookup) {
+  const url = assertPublicHttpUrl(raw)
+  if (isIP(bareHost(url.hostname))) return url
+  let records
+  try {
+    records = await lookup(url.hostname, { all: true, verbatim: true })
+  } catch {
+    throw new SourceError('blocked_host', 'That host is not allowed.')
+  }
+  const list = Array.isArray(records) ? records : [records]
+  if (list.length === 0) throw new SourceError('blocked_host', 'That host is not allowed.')
+  for (const record of list) {
+    const address = typeof record === 'string' ? record : record?.address
+    if (!address || isBlockedHost(address)) {
+      throw new SourceError('blocked_host', 'That host is not allowed.')
+    }
+  }
+  return url
+}
+
+export async function resolveSafeStreamUrl(raw, { fetchImpl = fetch, lookup = defaultLookup } = {}) {
+  let current = String(raw)
+  for (let hop = 0; hop < 5; hop += 1) {
+    const url = await assertResolvedPublicUrl(current, lookup)
+    const response = await fetchImpl(url.toString(), {
+      method: 'GET',
+      redirect: 'manual',
+      signal: AbortSignal.timeout(10_000),
+    })
+    const status = response.status ?? 200
+    if (status >= 300 && status < 400) {
+      const location = response.headers?.get?.('location')
+      if (!location) throw new SourceError('invalid_url', 'Redirect was empty.')
+      current = new URL(location, url).toString()
+      continue
+    }
+    if (typeof response.body?.cancel === 'function') {
+      try {
+        await response.body.cancel()
+      } catch {
+        /* the check only needed the headers */
+      }
+    }
+    return url.toString()
+  }
+  throw new SourceError('invalid_url', 'Too many redirects.')
+}
+
 function classifyAttachment(attachment, kind) {
   if (!attachment?.url) throw new SourceError('empty', 'Provide a URL or an audio attachment.')
   const url = assertPublicHttpUrl(attachment.url)
@@ -178,6 +243,12 @@ export function classifySource(input, options = {}) {
     throw new SourceError('empty', 'Provide a song name, a URL, or an audio attachment.')
   }
   const trimmed = input.trim()
+  if (!looksLikeUrl(trimmed)) {
+    if (kind === 'direct' || kind === 'radio') {
+      throw new SourceError('unsupported', 'A direct or radio source needs a URL.')
+    }
+    return { kind: 'search', query: trimmed.slice(0, 200) }
+  }
   let parsed = null
   try {
     parsed = new URL(trimmed)

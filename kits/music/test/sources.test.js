@@ -120,6 +120,11 @@ describe('source resolution', () => {
     const search = classifySource('a calm song')
     assert.equal(search.kind, 'search')
     assert.equal(search.query, 'a calm song')
+    assert.equal(classifySource('abba:dancing queen').kind, 'search')
+    assert.equal(classifySource('100% pure').kind, 'search')
+    const encoded = classifySource('https://cdn.example.com/100%25.mp3')
+    assert.equal(encoded.kind, 'direct')
+    assert.equal(classifySource('https://cdn.example.com/100%.mp3').kind, 'direct')
     for (const url of [
       'https://open.spotify.com/track/abc',
       'https://music.apple.com/us/album/example/1',

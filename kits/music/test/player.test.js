@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -56,6 +57,12 @@ function fakeVoice() {
         },
         on(event, fn) {
           handlers[event] = fn
+        },
+        rejoin(config) {
+          connection.joinConfig.channelId = config.channelId ?? connection.joinConfig.channelId
+          connection.state.status = VoiceConnectionStatus.Ready
+          connection.rejoins = (connection.rejoins ?? 0) + 1
+          return true
         },
         emitDisconnect() {
           connection.state.status = VoiceConnectionStatus.Disconnected
@@ -120,10 +127,27 @@ function harness(config, extra = {}) {
     },
     spawn(_file, args) {
       const stdout = new PassThrough()
-      const child = { stdout, args, killed: false, kill() { this.killed = true; stdout.end() } }
+      const stderr = new PassThrough()
+      const child = new EventEmitter()
+      child.stdout = stdout
+      child.stderr = stderr
+      child.args = args
+      child.killed = false
+      child.kill = () => {
+        child.killed = true
+        child.killedByUs = true
+        stdout.end()
+      }
       spawns.push(child)
       return child
     },
+    lookup: extra.lookup ?? (async () => [{ address: '1.1.1.1', family: 4 }]),
+    fetchImpl: extra.fetchImpl ?? (async () => ({
+      status: 200,
+      headers: { get() { return null } },
+      body: { async cancel() {} },
+    })),
+    ...(extra.spawn ? { spawn: extra.spawn } : {}),
     resolveStream: extra.resolveStream ?? (async (item) => item.url),
     relatedTracks: extra.relatedTracks,
     setVoiceStatus: extra.setVoiceStatus,
@@ -325,5 +349,150 @@ describe('player', () => {
     } finally {
       dir.remove()
     }
+  })
+
+  test('24/7 rejoins after a voice kick instead of treating the old connection as alive', async () => {
+    const dir = tempDir()
+    try {
+      const { createStateStore } = await import('../src/sessions.js')
+      const store = createStateStore(dir.path('state.json'))
+      const { music, voice, timers } = harness(playingConfig({ stayConnected: true }), {
+        stateStore: store,
+        fetchChannel: async (_guildId, channelId) => voiceChannel(guild, channelId),
+      })
+      await music.join(guild, voiceChannel(guild, '444444444444444444'))
+      const connection = voice.connections[0]
+      connection.emitDisconnect()
+      assert.equal(connection.joinConfig.channelId, '444444444444444444')
+      assert.equal(connection.state.status, VoiceConnectionStatus.Disconnected)
+      await timers.at(-1).fn()
+      assert.equal(connection.rejoins, 1)
+      assert.equal(connection.state.status, VoiceConnectionStatus.Ready)
+      assert.equal(music.snapshot(guild).connected, true)
+    } finally {
+      dir.remove()
+    }
+  })
+
+  test('five failed tracks are cleared so the next play starts', async () => {
+    let allow = true
+    const { music, voice } = harness(playingConfig(), {
+      resolveStream: async (item) => {
+        if (!allow || item.title.startsWith('Bad')) throw new Error('dead')
+        return item.url
+      },
+    })
+    const channel = voiceChannel(guild, '444444444444444444')
+    await music.play(guild, channel, [
+      track('Good'),
+      track('Bad 1'),
+      track('Bad 2'),
+      track('Bad 3'),
+      track('Bad 4'),
+      track('Bad 5'),
+    ])
+    allow = false
+    voice.players[0].emitIdle()
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(music.snapshot(guild).current, null)
+    allow = true
+    const again = await music.play(guild, channel, [track('After')])
+    assert.equal(again.ok, true)
+    assert.equal(music.snapshot(guild).current.title, 'After')
+  })
+
+  test('a ffmpeg process that exits immediately is not looped, and a missing binary is reported', async () => {
+    const { music, spawns } = harness(playingConfig(), {
+      spawn(_file, args) {
+        const stdout = new PassThrough()
+        const stderr = new PassThrough()
+        const child = new EventEmitter()
+        child.stdout = stdout
+        child.stderr = stderr
+        child.args = args
+        child.killed = false
+        child.kill = () => { child.killed = true }
+        process.nextTick(() => child.emit('exit', 1, null))
+        spawns.push(child)
+        return child
+      },
+    })
+    await music.loop(guild, 'song')
+    await assert.rejects(
+      () => music.play(guild, voiceChannel(guild, '444444444444444444'), [track('Loop')]),
+      /ffmpeg exited/,
+    )
+    assert.ok(spawns.length <= 2)
+    assert.equal(music.snapshot(guild).current, null)
+
+    const broken = harness(playingConfig(), {
+      spawn() {
+        const child = new EventEmitter()
+        child.stdout = new PassThrough()
+        child.stderr = new PassThrough()
+        child.kill = () => {}
+        process.nextTick(() => child.emit('error', Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' })))
+        return child
+      },
+    })
+    await assert.rejects(
+      () => broken.music.play(guild, voiceChannel(guild, '444444444444444444'), [track('Nope')]),
+      /FFMPEG_PATH/,
+    )
+  })
+
+  test('skip moves past a bad stream, and a cancelled sleep timer cannot drop a later session', async () => {
+    const { music, timers } = harness(playingConfig(), {
+      resolveStream: async (item) => {
+        if (item.title === 'Bad') throw new Error('dead')
+        return item.url
+      },
+    })
+    const channel = voiceChannel(guild, '444444444444444444')
+    await music.play(guild, channel, [track('Good'), track('Bad')])
+    const skipped = await music.skip(guild)
+    assert.equal(skipped.ok, true)
+    assert.equal(music.snapshot(guild).current, null)
+    const next = await music.play(guild, channel, [track('Later')])
+    assert.equal(next.ok, true)
+    assert.equal(music.snapshot(guild).current.title, 'Later')
+
+    await music.sleep(guild, 1)
+    const stale = timers.at(-1)
+    await music.leave(guild)
+    await music.join(guild, channel)
+    await stale.fn()
+    assert.equal(music.snapshot(guild).connected, true)
+  })
+
+  test('a public hostname that resolves to a private address is not given to ffmpeg', async () => {
+    const seen = []
+    const { music, spawns } = harness(playingConfig(), {
+      lookup: async () => [{ address: '127.0.0.1', family: 4 }],
+    })
+    await assert.rejects(
+      () => music.play(guild, voiceChannel(guild, '444444444444444444'), [track('Hidden')]),
+      (error) => error.code === 'blocked_host',
+    )
+    assert.equal(spawns.length, 0)
+    const redirected = harness(playingConfig(), {
+      fetchImpl: async (url) => {
+        seen.push(String(url))
+        if (String(url).includes('cdn.example.com')) {
+          return {
+            status: 302,
+            headers: { get: (name) => (name === 'location' ? 'http://10.1.2.3/secret' : null) },
+            body: { async cancel() {} },
+          }
+        }
+        return { status: 200, headers: { get: () => null }, body: { async cancel() {} } }
+      },
+    })
+    await assert.rejects(
+      () => redirected.music.play(guild, voiceChannel(guild, '444444444444444444'), [track('Hop')]),
+      (error) => error.code === 'blocked_host',
+    )
+    assert.equal(redirected.spawns.length, 0)
+    assert.equal(seen.some((url) => url.includes('10.1.2.3')), false)
   })
 })

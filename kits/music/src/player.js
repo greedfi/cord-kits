@@ -33,7 +33,7 @@ import {
 import { rejoinDelayMs } from './sessions.js'
 import { guildSettings, waitingLimit } from './settings.js'
 import { chooseAutoplayTrack, relatedSoundCloudTracks, resolveSoundCloudStream } from './soundcloud.js'
-import { assertPublicHttpUrl } from './sources.js'
+import { resolveSafeStreamUrl } from './sources.js'
 
 const defaultVoice = {
   AudioPlayerStatus,
@@ -124,6 +124,15 @@ export function createMusic(configStore, deps = {}) {
     })
     player.on(voice.AudioPlayerStatus.Idle, () => {
       if (session.token !== session.expectedIdleToken) return
+      const queue = queues.get(guildId)
+      const exit = session.ffmpegExit
+      const elapsed = queue?.startedAt == null ? 0 : now() - queue.startedAt
+      const badExit = exit
+        && exit.token === session.expectedIdleToken
+        && (exit.code !== 0 || elapsed < 500)
+      if (badExit && queue?.current && !queue.current.failed) {
+        queues.set(guildId, { ...queue, current: { ...queue.current, failed: true } })
+      }
       session.token += 1
       queueMicrotask(() => {
         lock(guildId, () => advance(guildId, { natural: true })).catch((error) => {
@@ -140,6 +149,7 @@ export function createMusic(configStore, deps = {}) {
     session.resource = null
     if (!child) return
     session.ffmpeg = null
+    child.killedByUs = true
     child.kill('SIGKILL')
   }
 
@@ -235,13 +245,37 @@ export function createMusic(configStore, deps = {}) {
     }
     const session = sessionFor(guildId)
     session.intentional = false
-    const alive = session.connection
-      && session.connection.state.status !== voice.VoiceConnectionStatus.Destroyed
-    if (alive && session.connection.joinConfig.channelId === channel.id) {
+    const status = session.connection?.state?.status
+    const reusable = status === voice.VoiceConnectionStatus.Ready
+      || status === voice.VoiceConnectionStatus.Connecting
+      || status === voice.VoiceConnectionStatus.Signalling
+    if (reusable && session.connection.joinConfig.channelId === channel.id) {
       session.connection.subscribe(session.player)
       session.channel = channel
       if (settings(guildId).stayConnected) remember(guildId, channel.id)
       return session.connection
+    }
+    if (
+      status === voice.VoiceConnectionStatus.Disconnected
+      && session.connection.joinConfig.channelId === channel.id
+      && typeof session.connection.rejoin === 'function'
+    ) {
+      const rejoined = session.connection.rejoin({ channelId: channel.id, selfDeaf: true })
+      if (rejoined) {
+        session.channel = channel
+        try {
+          await voice.entersState(session.connection, voice.VoiceConnectionStatus.Ready, 15_000)
+        } catch {
+          throw new Error('Could not connect to the voice channel.')
+        }
+        session.connection.subscribe(session.player)
+        session.rejoinAttempt = 0
+        if (settings(guildId).stayConnected) remember(guildId, channel.id)
+        if (!queueFor(guildId).paused && session.player.state?.status === voice.AudioPlayerStatus.Paused) {
+          session.player.unpause()
+        }
+        return session.connection
+      }
     }
     if (session.connection) {
       session.intentional = true
@@ -282,19 +316,21 @@ export function createMusic(configStore, deps = {}) {
     return connection
   }
 
+  function markFailed(guildId) {
+    const queue = queues.get(guildId)
+    if (!queue?.current || queue.current.failed) return
+    queues.set(guildId, { ...queue, current: { ...queue.current, failed: true } })
+  }
+
   async function streamUrl(track) {
-    if (deps.resolveStream) {
-      const url = await deps.resolveStream(track)
-      assertPublicHttpUrl(url)
-      return url
-    }
-    if (track.kind === 'soundcloud') {
-      const url = await resolveSoundCloudStream(track.url)
-      assertPublicHttpUrl(url)
-      return url
-    }
-    assertPublicHttpUrl(track.url)
-    return track.url
+    let raw
+    if (deps.resolveStream) raw = await deps.resolveStream(track)
+    else if (track.kind === 'soundcloud') raw = await resolveSoundCloudStream(track.url)
+    else raw = track.url
+    return resolveSafeStreamUrl(raw, {
+      fetchImpl: deps.fetchImpl ?? fetch,
+      lookup: deps.lookup,
+    })
   }
 
   async function startCurrent(guildId) {
@@ -310,12 +346,53 @@ export function createMusic(configStore, deps = {}) {
     const seekSeconds = queue.offsetMs > 0 && track.kind !== 'radio' ? queue.offsetMs / 1000 : 0
     const args = ffmpegArguments(url, { seekSeconds, filter: queue.filter })
     const executable = process.env.FFMPEG_PATH?.trim() || 'ffmpeg'
-    const child = spawnImpl(executable, args, { stdio: ['ignore', 'pipe', 'ignore'] })
+    const child = spawnImpl(executable, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+    const stderrChunks = []
+    child.stderr?.on?.('data', (chunk) => {
+      stderrChunks.push(chunk)
+      if (stderrChunks.length > 20) stderrChunks.shift()
+    })
+    child.stderr?.on?.('error', () => {})
+    child.stdout?.on?.('error', () => {})
+    child.once?.('error', (error) => {
+      session.ffmpegError = error
+      if (session.ffmpeg === child) {
+        session.ffmpeg = null
+        session.resource = null
+      }
+      markFailed(guildId)
+    })
+    child.once?.('exit', (code, signal) => {
+      if (child.killedByUs || signal === 'SIGKILL') return
+      session.ffmpegExit = { code: code ?? 0, token }
+    })
     if (session.token !== token || closed) {
+      child.killedByUs = true
       child.kill('SIGKILL')
       return
     }
     session.ffmpeg = child
+    session.ffmpegExit = null
+    session.ffmpegError = null
+    await new Promise((resolve) => process.nextTick(resolve))
+    if (session.token !== token || closed) {
+      child.killedByUs = true
+      child.kill('SIGKILL')
+      return
+    }
+    if (session.ffmpegError) {
+      const failure = new Error('ffmpeg failed to start. Install ffmpeg or set FFMPEG_PATH.')
+      session.startupError = failure
+      throw failure
+    }
+    if (session.ffmpegExit?.token === token) {
+      markFailed(guildId)
+      const detail = Buffer.concat(stderrChunks.map((chunk) => Buffer.from(chunk))).toString().trim()
+      const suffix = detail ? ` ${detail.slice(-180)}` : ''
+      const failure = new Error(`ffmpeg exited before playback started.${suffix}`)
+      session.startupError = failure
+      throw failure
+    }
     const resource = voice.createAudioResource(child.stdout, {
       inputType: voice.StreamType.Raw,
       inlineVolume: true,
@@ -385,11 +462,21 @@ export function createMusic(configStore, deps = {}) {
         return true
       } catch (error) {
         console.error(redact(`Playback failed: ${error.message}`))
-        const current = queues.get(guildId)
-        if (current?.current) {
-          queues.set(guildId, { ...current, current: { ...current.current, failed: true } })
-        }
+        markFailed(guildId)
+        const session = sessions.get(guildId)
+        if (session && !session.startupError) session.startupError = error
       }
+    }
+    const leftover = queues.get(guildId)
+    if (leftover?.current) {
+      queues.set(guildId, {
+        ...leftover,
+        history: [...leftover.history, leftover.current].slice(-25),
+        current: null,
+        offsetMs: 0,
+        startedAt: null,
+        paused: false,
+      })
     }
     await settleEmpty(guildId)
     return false
@@ -405,6 +492,10 @@ export function createMusic(configStore, deps = {}) {
     if (session.rejoinTimer) {
       session.rejoinTimer.cancel()
       session.rejoinTimer = null
+    }
+    if (session.sleepTimer) {
+      session.sleepTimer.cancel()
+      session.sleepTimer = null
     }
     killFfmpeg(session)
     session.token += 1
@@ -456,18 +547,29 @@ export function createMusic(configStore, deps = {}) {
       const session = sessionFor(guildId)
       session.token += 1
       session.player.stop(true)
-      await startCurrent(guildId)
+      await startOrAdvance(guildId)
     } else if (idle) {
       const started = await advance(guildId, { natural: true })
       if (!started) {
+        const failure = sessionFor(guildId).startupError
         queues.set(guildId, existing)
-        throw new Error('Could not start playback. Check ffmpeg and the URL.')
+        throw failure ?? new Error('Could not start playback. Check ffmpeg and the URL.')
       }
     }
     const waiting = queues.get(guildId)?.tracks.length ?? 0
     let message = describe(result, placement, idle)
     if (waiting > 0) message += ` ${waiting} waiting.`
     return { ok: true, message }
+  }
+
+  async function startOrAdvance(guildId) {
+    try {
+      await startCurrent(guildId)
+    } catch (error) {
+      console.error(redact(`Playback failed: ${error.message}`))
+      markFailed(guildId)
+      await advance(guildId, { natural: false })
+    }
   }
 
   async function restart(guildId) {
@@ -478,7 +580,7 @@ export function createMusic(configStore, deps = {}) {
     } catch (error) {
       console.error(redact(error.message))
     }
-    await startCurrent(guildId)
+    await startOrAdvance(guildId)
   }
 
   return {
@@ -519,14 +621,21 @@ export function createMusic(configStore, deps = {}) {
           await settleEmpty(guildId)
           return { ok: true, message: 'Skipped. The queue is empty.' }
         }
-        await startCurrent(guildId)
-        return { ok: true, message: `Skipped. Now playing **${safeLabel(step.track.title || step.track.url)}**.` }
+        await startOrAdvance(guildId)
+        const playing = queues.get(guildId)?.current
+        if (!playing) return { ok: true, message: 'Skipped. The queue is empty.' }
+        return { ok: true, message: `Skipped. Now playing **${safeLabel(playing.title || playing.url)}**.` }
       })
     },
     async back(guildId) {
       return lock(guildId, async () => {
-        const result = backTrack(queueFor(guildId))
-        if (!result.ok) return { ok: false, message: 'Nothing to go back to.' }
+        const result = backTrack(queueFor(guildId), limit(guildId))
+        if (!result.ok) {
+          const message = result.error === 'queue_full'
+            ? 'The queue is full.'
+            : 'Nothing to go back to.'
+          return { ok: false, message }
+        }
         queues.set(guildId, result.state)
         await restart(guildId)
         return { ok: true, message: `Back to **${safeLabel(result.track.title || result.track.url)}**.` }
@@ -663,7 +772,8 @@ export function createMusic(configStore, deps = {}) {
         }
         const until = now() + minutes * 60_000
         stateStore?.put(guildId, { sleepUntil: until, channelId: session.channel?.id ?? null })
-        session.sleepTimer = schedule(() => {
+        const timer = schedule(() => {
+          if (session.sleepTimer !== timer) return null
           session.sleepTimer = null
           return lock(guildId, async () => {
             const channel = disconnect(guildId, { clear: true })
@@ -671,6 +781,7 @@ export function createMusic(configStore, deps = {}) {
             await showStatus(channel, null)
           }).catch(logError)
         }, minutes * 60_000)
+        session.sleepTimer = timer
         return { ok: true, message: `Leaving in ${minutes} minute${minutes === 1 ? '' : 's'}.` }
       })
     },

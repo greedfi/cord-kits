@@ -9,6 +9,16 @@ import { createPlaylistStore } from './playlists.js'
 import { createStateStore } from './sessions.js'
 import { pushVoiceStatus } from './voice-status.js'
 
+function missingPanel(error) {
+  return error?.code === 10008 || error?.code === 10003 || error?.code === 50001
+}
+
+function panelKey(payload) {
+  const embed = payload.embeds?.[0]?.toJSON?.() ?? payload.embeds?.[0] ?? {}
+  const rows = (payload.components ?? []).map((row) => row.toJSON?.() ?? row)
+  return JSON.stringify({ embed, rows })
+}
+
 function logError(error) {
   const text = error instanceof Error ? error.stack ?? error.message : error
   console.error(redact(text))
@@ -44,6 +54,9 @@ export function createPanels({ store, editMessage, sendMessage }) {
     async edit(target, body) {
       await editMessage(target, { ...body, allowedMentions: SAFE_MENTIONS })
     },
+    forget(guildId) {
+      store.put(guildId, { panelChannelId: null, panelMessageId: null })
+    },
     async show(guildId, channel, body) {
       const current = this.get(guildId)
       if (current?.channelId === channel.id) {
@@ -51,7 +64,7 @@ export function createPanels({ store, editMessage, sendMessage }) {
           await this.edit(current, body)
           return current
         } catch (error) {
-          if (error?.code !== 10008) throw error
+          if (!missingPanel(error)) throw error
         }
       }
       const sent = await sendMessage(channel, { ...body, allowedMentions: SAFE_MENTIONS })
@@ -70,6 +83,7 @@ export function createProgressLoop({
   interval = defaultInterval,
 }) {
   const last = new Map()
+  const sent = new Map()
   const trailing = new Map()
   let timer = null
 
@@ -77,6 +91,8 @@ export function createProgressLoop({
     const target = panels.get(guildId)
     if (!target) return
     const clock = now()
+    const snapshot = music.snapshot(guildId)
+    if (reason === 'progress' && !snapshot.current) return
     const decision = editDecision({ now: clock, lastEditAt: last.get(guildId) ?? 0, reason })
     if (decision === 'wait') return
     if (decision === 'trail') {
@@ -87,8 +103,18 @@ export function createProgressLoop({
       }, MIN_EDIT_GAP_MS))
       return
     }
-    await panels.edit(target, nowPlayingPayload(music.snapshot(guildId), clock))
-    last.set(guildId, now())
+    const body = nowPlayingPayload(snapshot, clock)
+    const key = panelKey(body)
+    if (key === sent.get(guildId)) return
+    sent.set(guildId, key)
+    last.set(guildId, clock)
+    try {
+      await panels.edit(target, body)
+    } catch (error) {
+      if (!missingPanel(error)) throw error
+      panels.forget?.(guildId)
+      sent.delete(guildId)
+    }
   }
 
   return {

@@ -17,8 +17,7 @@ export function readJsonFile(file, fsImpl = fs) {
     let backup
     try {
       backup = fsImpl.readFileSync(bak, 'utf8')
-    } catch (backupError) {
-      if (backupError.code === 'ENOENT') throw error
+    } catch {
       throw error
     }
     return JSON.parse(backup)

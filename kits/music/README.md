@@ -112,7 +112,7 @@ Global commands can take up to an hour to appear. Guild registration is immediat
 | `/playlist` | create, add, addtrack, addqueue, show, play, remove, delete, share, import. |
 | `/ping` | Gateway and round-trip time. |
 
-The player message has Pause/Resume, Skip, Back, Loop, Shuffle, and Stop. The same DJ, text, and voice checks apply to those buttons. The progress line updates about every 12 seconds, and a control waits at least 4 seconds between edits.
+The player message has Pause/Resume, Skip, Back, Loop, Shuffle, and Stop. The same DJ, text, and voice checks apply to those buttons. The progress line updates every 12 seconds, measured from the start of the edit so a slow edit does not stretch the gap. A control waits at least 4 seconds between edits. Idle panels are not edited. A deleted panel is forgotten.
 
 `/setup` keeps one player message in the request channel. Members type a name or a URL there. Auto-delete removes those messages when the bot has Manage Messages. "Commands only" limits music commands to that channel. Settings commands still work elsewhere so the limit can be changed. The request channel stays usable even if a text allow-list is set.
 

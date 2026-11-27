@@ -102,13 +102,3 @@ export function searchMenu(results) {
     allowedMentions: SAFE_MENTIONS,
   }
 }
-
-export function payloadLength(payload) {
-  const embed = payload.embeds?.[0]?.data ?? payload.embeds?.[0] ?? {}
-  const title = embed.title?.length ?? 0
-  const description = embed.description?.length ?? 0
-  const fields = (embed.fields ?? []).reduce((sum, field) => (
-    sum + (field.name?.length ?? 0) + (field.value?.length ?? 0)
-  ), 0)
-  return title + description + fields
-}

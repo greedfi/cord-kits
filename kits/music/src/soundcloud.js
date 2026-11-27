@@ -1,14 +1,17 @@
 import { SourceError, assertPublicHttpUrl } from './sources.js'
 
 const USER_AGENT = 'cord-kits-music/0.1'
-export const MAX_DISCOVERY_SCRIPTS = 30
-export const MAX_HTML_CHARS = 1_500_000
-export const MAX_SCRIPT_CHARS = 2_000_000
+const MAX_DISCOVERY_SCRIPTS = 30
+const MAX_HTML_CHARS = 1_500_000
+const MAX_SCRIPT_CHARS = 2_000_000
+const REQUEST_TIMEOUT_MS = 10_000
 
 let cachedClientId = null
+let pendingDiscovery = null
 
 export function clearClientIdCache() {
   cachedClientId = null
+  pendingDiscovery = null
 }
 
 export function extractScriptUrls(html) {
@@ -74,21 +77,68 @@ export function planSoundCloudTracks(payload, pageUrl, maxTracks = 10) {
     .slice(0, maxTracks)
 }
 
-export async function discoverClientId(fetchImpl = fetch, options = {}) {
+function requestSignal() {
+  return AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+}
+
+async function readBounded(response, max) {
+  const body = response.body
+  if (!body || typeof body.getReader !== 'function') {
+    const text = typeof response.text === 'function' ? await response.text() : ''
+    return String(text).slice(0, max)
+  }
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let received = ''
+  while (received.length < max) {
+    const { done, value } = await reader.read()
+    if (done) break
+    received += decoder.decode(value, { stream: true })
+    if (received.length >= max) {
+      try {
+        await reader.cancel()
+      } catch {
+        /* the rest of the body is unused */
+      }
+      break
+    }
+  }
+  return received.slice(0, max)
+}
+
+async function discoverOnce(fetchImpl, options = {}) {
   const maxScripts = options.maxScripts ?? MAX_DISCOVERY_SCRIPTS
+  const maxHtml = options.maxHtmlChars ?? MAX_HTML_CHARS
+  const maxScript = options.maxScriptChars ?? MAX_SCRIPT_CHARS
   const home = await fetchImpl('https://soundcloud.com/', {
     headers: { 'User-Agent': USER_AGENT },
+    signal: requestSignal(),
   })
   if (!home.ok) return null
-  const html = (await home.text()).slice(0, MAX_HTML_CHARS)
+  const html = await readBounded(home, maxHtml)
   const scripts = extractScriptUrls(html).slice(0, maxScripts)
   for (const scriptUrl of scripts) {
-    const response = await fetchImpl(scriptUrl, { headers: { 'User-Agent': USER_AGENT } })
+    const response = await fetchImpl(scriptUrl, {
+      headers: { 'User-Agent': USER_AGENT },
+      signal: requestSignal(),
+    })
     if (!response.ok) continue
-    const clientId = extractClientId((await response.text()).slice(0, MAX_SCRIPT_CHARS))
+    const clientId = extractClientId(await readBounded(response, maxScript))
     if (clientId) return clientId
   }
   return null
+}
+
+export async function discoverClientId(fetchImpl = fetch, options = {}) {
+  if (options.maxScripts != null || options.maxHtmlChars != null) {
+    return discoverOnce(fetchImpl, options)
+  }
+  if (!pendingDiscovery) {
+    pendingDiscovery = discoverOnce(fetchImpl, options).finally(() => {
+      pendingDiscovery = null
+    })
+  }
+  return pendingDiscovery
 }
 
 function envClientId() {
@@ -117,6 +167,7 @@ class SoundCloudHttpError extends Error {
 async function requestJson(fetchImpl, url) {
   const response = await fetchImpl(url, {
     headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
+    signal: requestSignal(),
   })
   if (!response.ok) throw new SoundCloudHttpError(response.status)
   return response.json()
