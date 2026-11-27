@@ -63,6 +63,34 @@ export function authorize({
   return null
 }
 
+const VOICE_JOIN_PERMISSIONS = [
+  [PermissionFlagsBits.ViewChannel, 'View Channel'],
+  [PermissionFlagsBits.Connect, 'Connect'],
+  [PermissionFlagsBits.Speak, 'Speak'],
+]
+
+export function missingVoicePermissions(channel, member) {
+  if (typeof channel?.permissionsFor !== 'function' || !member) return null
+  let permissions
+  try {
+    permissions = channel.permissionsFor(member)
+  } catch {
+    return null
+  }
+  if (typeof permissions?.has !== 'function') return null
+  return VOICE_JOIN_PERMISSIONS
+    .filter(([bit]) => !permissions.has(bit))
+    .map(([, label]) => label)
+}
+
+export function voicePermissionMessage(channel, missing) {
+  const names = missing.length <= 1
+    ? missing[0]
+    : `${missing.slice(0, -1).join(', ')} and ${missing.at(-1)}`
+  const where = channel?.id ? `<#${channel.id}>` : 'that voice channel'
+  return `I need ${names} in ${where}; check the channel or category permissions.`
+}
+
 export function voiceAllowed(settings, channelId) {
   if (!channelId) return true
   if (settings.voiceChannels.length === 0) return true

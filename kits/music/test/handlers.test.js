@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { PermissionFlagsBits } from 'discord.js'
+import { MessageFlags, PermissionFlagsBits } from 'discord.js'
 import { createApp } from '../src/handlers.js'
 import { gatewayIntents } from '../src/permissions.js'
 import { attachClient } from '../src/runtime.js'
@@ -254,5 +254,55 @@ describe('interaction routing', () => {
     } finally {
       console.error = original
     }
+  })
+
+  test('play is refused when View Channel, Connect, or Speak is missing', async () => {
+    const cases = [
+      ['View Channel', PermissionFlagsBits.ViewChannel, 'play'],
+      ['Connect', PermissionFlagsBits.Connect, 'play'],
+      ['Speak', PermissionFlagsBits.Speak, 'join'],
+    ]
+    for (const [label, bit, commandName] of cases) {
+      const { app, music } = appFor()
+      const command = mockInteraction({
+        commandName,
+        options: { query: 'song' },
+        botChannelId: null,
+        voiceChannel: {
+          id: '444444444444444444',
+          type: 2,
+          permissionsFor() {
+            return { has: (flag) => flag !== bit }
+          },
+        },
+      })
+      await app.handleInteraction(command.interaction)
+      assert.equal(music.calls.length, 0, label)
+      assert.equal(command.replies[0].type, 'reply')
+      assert.equal(command.replies[0].payload.flags, MessageFlags.Ephemeral)
+      assert.match(command.replies[0].payload.content, new RegExp(`I need ${label} in <#444444444444444444>`))
+      assert.match(command.replies[0].payload.content, /category permissions/)
+    }
+  })
+
+  test('a category overwrite that denies View Channel blocks the join', async () => {
+    const { app, music } = appFor()
+    const command = mockInteraction({
+      commandName: 'play',
+      options: { query: 'song' },
+      botChannelId: null,
+      permissions: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak],
+      voiceChannel: {
+        id: '444444444444444444',
+        type: 2,
+        permissionsFor() {
+          return { has: (flag) => flag !== PermissionFlagsBits.ViewChannel }
+        },
+      },
+    })
+    await app.handleInteraction(command.interaction)
+    assert.equal(music.calls.length, 0)
+    assert.equal(command.replies[0].payload.flags, MessageFlags.Ephemeral)
+    assert.match(command.replies[0].payload.content, /I need View Channel in <#444444444444444444>/)
   })
 })

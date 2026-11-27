@@ -10,7 +10,7 @@ import {
   StreamType,
   VoiceConnectionStatus,
 } from '@discordjs/voice'
-import { ChannelType } from 'discord.js'
+import { ChannelType, PermissionFlagsBits } from 'discord.js'
 import { createMusic } from '../src/player.js'
 import { waitingLimit } from '../src/settings.js'
 import { rejoinDelayMs } from '../src/sessions.js'
@@ -37,7 +37,7 @@ function voiceChannel(guildId, channelId) {
   }
 }
 
-function fakeVoice() {
+function fakeVoice(voiceStatus) {
   const connections = []
   const players = []
   return {
@@ -71,6 +71,7 @@ function fakeVoice() {
           handlers.stateChange?.({}, { status: VoiceConnectionStatus.Disconnected })
         },
       }
+      if (voiceStatus) connection.state.status = voiceStatus
       connections.push(connection)
       return connection
     },
@@ -115,7 +116,7 @@ function fakeVoice() {
 }
 
 function harness(config, extra = {}) {
-  const voice = fakeVoice()
+  const voice = fakeVoice(extra.voiceStatus)
   const spawns = []
   const timers = []
   let clock = 1_000
@@ -576,6 +577,64 @@ describe('player', () => {
 
   test('a real redirect to a private host is refused before ffmpeg', async () => {
     await withLocalDns(checkPrivateRedirect)
+  })
+
+  test('24/7 rejoin logs a missing voice permission and waits instead of joining', async () => {
+    let allowView = true
+    const channel = voiceChannel(guild, '444444444444444444')
+    channel.permissionsFor = () => ({
+      has: (bit) => bit !== PermissionFlagsBits.ViewChannel || allowView,
+    })
+    const dir = tempDir()
+    const errors = []
+    const original = console.error
+    console.error = (line) => errors.push(String(line))
+    try {
+      const { createStateStore } = await import('../src/sessions.js')
+      const store = createStateStore(dir.path('state.json'))
+      const { music, voice, timers } = harness(playingConfig({ stayConnected: true }), {
+        stateStore: store,
+        fetchChannel: async () => channel,
+      })
+      await music.join(guild, channel)
+      assert.equal(voice.connections.length, 1)
+      allowView = false
+      voice.connections[0].emitDisconnect()
+      await timers.at(-1).fn()
+      assert.equal(voice.connections.length, 1)
+      assert.equal(voice.connections[0].rejoins ?? 0, 0)
+      assert.match(errors.join('\n'), /I need View Channel in <#444444444444444444>/)
+      assert.equal(timers.at(-1).ms, 2_000)
+    } finally {
+      console.error = original
+      dir.remove()
+    }
+  })
+
+  test('a ready timeout explains signalling and connecting', async () => {
+    const errors = []
+    const original = console.error
+    console.error = (line) => errors.push(String(line))
+    try {
+      const signalling = harness(playingConfig(), { voiceStatus: VoiceConnectionStatus.Signalling })
+      await assert.rejects(
+        () => signalling.music.play(guild, voiceChannel(guild, '444444444444444444'), [track('Signal')]),
+        /Could not connect to the voice channel/,
+      )
+      assert.equal(signalling.voice.connections[0].state.status, VoiceConnectionStatus.Destroyed)
+      assert.match(errors.join('\n'), /timed out \(signalling\).*permission/)
+
+      errors.length = 0
+      const connecting = harness(playingConfig(), { voiceStatus: VoiceConnectionStatus.Connecting })
+      await assert.rejects(
+        () => connecting.music.play(guild, voiceChannel(guild, '454444444444444444'), [track('Connect')]),
+        /Could not connect to the voice channel/,
+      )
+      assert.equal(connecting.voice.connections[0].state.status, VoiceConnectionStatus.Destroyed)
+      assert.match(errors.join('\n'), /timed out \(connecting\).*UDP/)
+    } finally {
+      console.error = original
+    }
   })
 })
 

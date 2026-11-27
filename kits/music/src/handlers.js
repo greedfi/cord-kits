@@ -1,5 +1,11 @@
 import { ChannelType, MessageFlags, PermissionFlagsBits } from 'discord.js'
-import { authorize, commandForButton, voiceAllowed } from './access.js'
+import {
+  authorize,
+  commandForButton,
+  missingVoicePermissions,
+  voiceAllowed,
+  voicePermissionMessage,
+} from './access.js'
 import { CONFIG_COMMANDS, FILTER_IDS, LOOP_MODES } from './catalog.js'
 import { redact } from './env.js'
 import { nowPlayingPayload, SAFE_MENTIONS, searchMenu } from './nowplaying.js'
@@ -94,13 +100,8 @@ function checkVoice(commandName, interaction, settings) {
     if (commandName !== 'join' && botChannel && botChannel !== voice.id) {
       return 'I am already playing in another voice channel.'
     }
-    const permissions = voice.permissionsFor?.(interaction.guild.members.me)
-    if (
-      permissions
-      && (!permissions.has(PermissionFlagsBits.Connect) || !permissions.has(PermissionFlagsBits.Speak))
-    ) {
-      return 'I need Connect and Speak in that voice channel.'
-    }
+    const missing = missingVoicePermissions(voice, interaction.guild?.members?.me)
+    if (missing?.length) return voicePermissionMessage(voice, missing)
   }
   if (commandName === 'filter') {
     const botChannel = botVoiceId(interaction)
@@ -790,12 +791,9 @@ export function createApp(deps) {
       await message.channel.send(plainMessage('I am already playing in another voice channel.')).catch(logError)
       return
     }
-    const voicePermissions = voice.permissionsFor?.(message.guild.members?.me)
-    if (
-      voicePermissions
-      && (!voicePermissions.has(PermissionFlagsBits.Connect) || !voicePermissions.has(PermissionFlagsBits.Speak))
-    ) {
-      await message.channel.send(plainMessage('I need Connect and Speak in that voice channel.')).catch(logError)
+    const missing = missingVoicePermissions(voice, message.guild.members?.me)
+    if (missing?.length) {
+      await message.channel.send(plainMessage(voicePermissionMessage(voice, missing))).catch(logError)
       return
     }
     try {

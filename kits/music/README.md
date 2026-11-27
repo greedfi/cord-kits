@@ -121,7 +121,7 @@ The player message has Pause/Resume, Skip, Back, Loop, Shuffle, and Stop. The sa
 
 `/setup` keeps one player message in the request channel. Members type a name or a URL there. Auto-delete removes those messages when the bot has Manage Messages. "Commands only" limits music commands to that channel. Settings commands still work elsewhere so the limit can be changed. The request channel stays usable even if a text allow-list is set.
 
-Join a normal voice channel before playing. Stage channels are not supported. The bot joins, deafens itself, and refuses YouTube, Spotify, Apple Music, non-http(s) URLs, and private or loopback hosts. The private-host check is best effort: ffmpeg resolves DNS again and can follow a later redirect.
+Join a normal voice channel before playing. The bot needs View Channel, Connect, and Speak there, including on a category overwrite. Stage channels are not supported. The bot joins, deafens itself, and refuses YouTube, Spotify, Apple Music, non-http(s) URLs, and private or loopback hosts. The private-host check is best effort: ffmpeg resolves DNS again and can follow a later redirect.
 
 SoundCloud playlists queue up to the waiting-track cap. Each stream is resolved when it starts. A discovered client id is cached. A 401 or 403 drops that cache and discovers a new id once. `SOUNDCLOUD_CLIENT_ID` is never replaced. Direct files, radio playlist URLs (`.m3u`, `.m3u8`, `.pls`), and paths that look like `/stream`, `/radio`, `/live`, or `/listen` go to ffmpeg. Attachments must be audio and at most 25 MB.
 

@@ -10,7 +10,7 @@ import {
   joinVoiceChannel,
 } from '@discordjs/voice'
 import { ChannelType } from 'discord.js'
-import { voiceAllowed } from './access.js'
+import { missingVoicePermissions, voiceAllowed, voicePermissionMessage } from './access.js'
 import { redact } from './env.js'
 import { ffmpegArguments, filterRate } from './filters.js'
 import {
@@ -233,6 +233,16 @@ export function createMusic(configStore, deps = {}) {
     }, delay)
   }
 
+  function logVoiceTimeout(connection) {
+    const status = connection?.state?.status ?? 'unknown'
+    const hint = status === voice.VoiceConnectionStatus.Signalling
+      ? 'signalling usually means a channel or category permission, or the voice region'
+      : status === voice.VoiceConnectionStatus.Connecting
+        ? 'connecting usually means network or UDP is blocked on the host'
+        : 'the voice gateway did not become ready'
+    console.error(redact(`Voice join timed out (${status}): ${hint}.`))
+  }
+
   async function connect(channel) {
     const guildId = channel.guild.id
     if (channel.type === ChannelType.GuildStageVoice) {
@@ -244,7 +254,13 @@ export function createMusic(configStore, deps = {}) {
     const session = sessionFor(guildId)
     session.intentional = false
     const status = session.connection?.state?.status
-    if (status === voice.VoiceConnectionStatus.Ready && session.connection.joinConfig.channelId === channel.id) {
+    const alreadyThere = status === voice.VoiceConnectionStatus.Ready
+      && session.connection.joinConfig.channelId === channel.id
+    if (!alreadyThere) {
+      const missing = missingVoicePermissions(channel, channel.guild?.members?.me)
+      if (missing?.length) throw new Error(voicePermissionMessage(channel, missing))
+    }
+    if (alreadyThere) {
       session.connection.subscribe(session.player)
       session.channel = channel
       if (settings(guildId).stayConnected) remember(guildId, channel.id)
@@ -261,6 +277,7 @@ export function createMusic(configStore, deps = {}) {
         try {
           await voice.entersState(session.connection, voice.VoiceConnectionStatus.Ready, 15_000)
         } catch {
+          logVoiceTimeout(session.connection)
           const connection = session.connection
           session.intentional = true
           try {
@@ -304,6 +321,7 @@ export function createMusic(configStore, deps = {}) {
     try {
       await voice.entersState(connection, voice.VoiceConnectionStatus.Ready, 15_000)
     } catch {
+      logVoiceTimeout(connection)
       try {
         connection.destroy()
       } catch (error) {
