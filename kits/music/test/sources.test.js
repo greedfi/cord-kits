@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { SourceError, classifySource, isYouTubeUrl } from '../src/sources.js'
+import { SourceError, classifySource, isYouTubeUrl, resolveSafeStreamUrl } from '../src/sources.js'
 
 const youtubeUrls = [
   'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
@@ -121,6 +121,17 @@ describe('source resolution', () => {
     assert.equal(search.kind, 'search')
     assert.equal(search.query, 'a calm song')
     assert.equal(classifySource('abba:dancing queen').kind, 'search')
+    assert.throws(() => classifySource('open.spotify.com/track/abc'), (error) => error.code === 'not_a_source')
+    assert.throws(() => classifySource('music.apple.com/us/album/example'), (error) => error.code === 'not_a_source')
+    for (const url of [
+      'https://rr3---sn.googlevideo.com/videoplayback?id=1',
+      'https://i.ytimg.com/vi/abc/0.jpg',
+      'https://p.scdn.co/mp3-preview/x',
+      'https://audio.spotifycdn.com/file',
+      'https://open.spotify.link/abc',
+    ]) {
+      assert.throws(() => classifySource(url), SourceError, url)
+    }
     assert.equal(classifySource('100% pure').kind, 'search')
     const encoded = classifySource('https://cdn.example.com/100%25.mp3')
     assert.equal(encoded.kind, 'direct')
@@ -132,6 +143,27 @@ describe('source resolution', () => {
     ]) {
       assert.throws(() => classifySource(url), (error) => error.code === 'not_a_source', url)
     }
+  })
+
+  test('an ICY response is kept after the host is already public', async () => {
+    const lookup = async () => [{ address: '1.1.1.1', family: 4 }]
+    const url = 'https://radio.example.com/stream'
+    const icy = Object.assign(new Error('Parse Error: Invalid constant'), { code: 'HPE_INVALID_CONSTANT' })
+    assert.equal(await resolveSafeStreamUrl(url, {
+      lookup,
+      requestImpl: async () => { throw icy },
+    }), url)
+    assert.equal(await resolveSafeStreamUrl(url, {
+      lookup,
+      requestImpl: async () => ({ statusCode: 200, headers: { 'icy-name': 'Station' } }),
+    }), url)
+    await assert.rejects(
+      () => resolveSafeStreamUrl(url, {
+        lookup,
+        requestImpl: async () => ({ statusCode: 302, headers: { location: 'https://p.scdn.co/redirect' } }),
+      }),
+      (error) => error.code === 'not_a_source',
+    )
   })
 
   test('a file named youtube.mp3 on another host is direct audio', () => {

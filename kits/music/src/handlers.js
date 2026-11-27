@@ -190,10 +190,6 @@ export function createApp(deps) {
 
   async function onPlaylist(interaction) {
     const sub = interaction.options.getSubcommand()
-    const ephemeralReply = sub !== 'play'
-    if (!interaction.deferred && !interaction.replied) {
-      await interaction.deferReply(ephemeralReply ? { flags: MessageFlags.Ephemeral } : undefined)
-    }
     const name = interaction.options.getString('name')
     const actorId = interaction.user.id
     const manage = authorize({
@@ -327,9 +323,6 @@ export function createApp(deps) {
     const { commandName } = interaction
     const guildId = interaction.guildId
     const settings = settingsFor(guildId)
-    if (LOCKED.has(commandName) && commandName !== 'playlist' && !interaction.deferred && !interaction.replied) {
-      await interaction.deferReply(commandName === 'search' ? { flags: MessageFlags.Ephemeral } : undefined)
-    }
     if (PLACEMENTS[commandName]) {
       await playResolved(interaction, PLACEMENTS[commandName])
       return

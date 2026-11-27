@@ -215,6 +215,7 @@ describe('player', () => {
     fail = true
     voice.players[0].emitIdle()
     await new Promise((resolve) => setImmediate(resolve))
+    await music.settled(guild)
     assert.ok(calls - before <= 5)
     assert.equal(music.snapshot(guild).current, null)
     fail = false
@@ -249,6 +250,7 @@ describe('player', () => {
       assert.ok(statusCalls >= 1)
       voice.players[0].emitIdle()
       await new Promise((resolve) => setImmediate(resolve))
+      await music.settled(guild)
       assert.equal(music.snapshot(guild).current.title, 'B')
       assert.ok(statusCalls >= 2)
       assert.equal(statusLogs, 1)
@@ -258,6 +260,7 @@ describe('player', () => {
     related.push(first, fresh)
     voice.players[0].emitIdle()
     await new Promise((resolve) => setImmediate(resolve))
+    await music.settled(guild)
     assert.equal(music.snapshot(guild).current, null)
   })
 
@@ -394,6 +397,7 @@ describe('player', () => {
     allow = false
     voice.players[0].emitIdle()
     await new Promise((resolve) => setImmediate(resolve))
+    await music.settled(guild)
     assert.equal(music.snapshot(guild).current, null)
     allow = true
     const again = await music.play(guild, channel, [track('After')])
@@ -494,5 +498,71 @@ describe('player', () => {
     )
     assert.equal(redirected.spawns.length, 0)
     assert.equal(seen.some((url) => url.includes('10.1.2.3')), false)
+  })
+
+  test('a timed-out rejoin is dropped and the next backoff attempt continues', async () => {
+    const dir = tempDir()
+    try {
+      const { createStateStore } = await import('../src/sessions.js')
+      const store = createStateStore(dir.path('state.json'))
+      const { music, voice, timers } = harness(playingConfig({ stayConnected: true }), {
+        stateStore: store,
+        fetchChannel: async (_guildId, channelId) => voiceChannel(guild, channelId),
+      })
+      await music.join(guild, voiceChannel(guild, '444444444444444444'))
+      const connection = voice.connections[0]
+      connection.rejoin = () => {
+        connection.state.status = VoiceConnectionStatus.Signalling
+        connection.rejoins = (connection.rejoins ?? 0) + 1
+        return true
+      }
+      connection.emitDisconnect()
+      await timers.at(-1).fn()
+      assert.equal(connection.rejoins, 1)
+      assert.equal(music.snapshot(guild).connected, false)
+      assert.ok(timers.length >= 2)
+      await timers.at(-1).fn()
+      assert.equal(music.snapshot(guild).connected, true)
+      assert.equal(voice.connections.at(-1).state.status, VoiceConnectionStatus.Ready)
+    } finally {
+      dir.remove()
+    }
+  })
+
+  test('a later playback failure is not reported as the first error', async () => {
+    let message = 'first failure'
+    const { music } = harness(playingConfig(), {
+      resolveStream: async () => {
+        throw Object.assign(new Error(message), { code: 'blocked_host' })
+      },
+    })
+    const channel = voiceChannel(guild, '444444444444444444')
+    await assert.rejects(() => music.play(guild, channel, [track('A')]), /first failure/)
+    message = 'second failure'
+    await assert.rejects(() => music.play(guild, channel, [track('B')]), /second failure/)
+  })
+
+  test('a short ending after seek is not a failure, and a late non-zero exit stops the loop', async () => {
+    const { music, voice, spawns, setClock } = harness(playingConfig())
+    const channel = voiceChannel(guild, '444444444444444444')
+    await music.play(guild, channel, [track('Song')])
+    await music.loop(guild, 'song')
+    await music.seek(guild, 179_000)
+    setClock(1_200)
+    const child = spawns.at(-1)
+    child.emit('exit', 0, null)
+    voice.players[0].emitIdle()
+    await new Promise((resolve) => setImmediate(resolve))
+    await music.settled(guild)
+    assert.equal(music.snapshot(guild).current?.title, 'Song')
+    assert.equal(music.snapshot(guild).current?.failed, false)
+
+    const dead = spawns.at(-1)
+    voice.players[0].emitIdle()
+    dead.emit('exit', 1, null)
+    await new Promise((resolve) => setImmediate(resolve))
+    await music.settled(guild)
+    assert.ok(spawns.length <= 4)
+    assert.equal(music.snapshot(guild).current, null)
   })
 })

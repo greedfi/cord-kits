@@ -1,4 +1,6 @@
 import { promises as dns } from 'node:dns'
+import http from 'node:http'
+import https from 'node:https'
 import { isIP } from 'node:net'
 
 export class SourceError extends Error {
@@ -19,6 +21,8 @@ const YOUTUBE_HOSTS = new Set([
   'youtube-nocookie.com',
   'music.youtube.com',
   'youtubeeducation.com',
+  'googlevideo.com',
+  'ytimg.com',
 ])
 const KINDS = new Set(['auto', 'soundcloud', 'direct', 'radio'])
 
@@ -90,6 +94,8 @@ function isYouTubeHost(hostname) {
   if (host.endsWith('.youtube.com')) return true
   if (host.endsWith('.youtube-nocookie.com')) return true
   if (host.endsWith('.youtu.be')) return true
+  if (host.endsWith('.googlevideo.com')) return true
+  if (host.endsWith('.ytimg.com')) return true
   return false
 }
 
@@ -98,7 +104,14 @@ function isSoundCloudHost(hostname) {
   return host === 'soundcloud.com' || host.endsWith('.soundcloud.com')
 }
 
-const BLOCKED_SERVICES = ['spotify.com', 'music.apple.com', 'itunes.apple.com']
+const BLOCKED_SERVICES = [
+  'spotify.com',
+  'music.apple.com',
+  'itunes.apple.com',
+  'scdn.co',
+  'spotifycdn.com',
+  'spotify.link',
+]
 
 function isBlockedService(hostname) {
   const host = bareHost(hostname)
@@ -189,18 +202,60 @@ export async function assertResolvedPublicUrl(raw, lookup = defaultLookup) {
   return url
 }
 
-export async function resolveSafeStreamUrl(raw, { fetchImpl = fetch, lookup = defaultLookup } = {}) {
+function isProtocolParseError(error) {
+  const code = String(error?.code ?? '')
+  const message = String(error?.message ?? '')
+  return code.startsWith('HPE_') || /parse error|invalid header|icy/i.test(message)
+}
+
+function probeStream(url) {
+  return new Promise((resolve, reject) => {
+    const lib = url.protocol === 'https:' ? https : http
+    const req = lib.request(url, {
+      method: 'GET',
+      insecureHTTPParser: true,
+      timeout: 10_000,
+      headers: { 'User-Agent': 'cord-kits-music/0.1', 'Icy-MetaData': '0' },
+    }, (res) => {
+      res.resume()
+      resolve({ status: res.statusCode ?? 200, headers: res.headers })
+    })
+    req.on('error', reject)
+    req.on('timeout', () => req.destroy(new Error('audio check timed out')))
+    req.end()
+  })
+}
+
+function headerValue(headers, name) {
+  if (!headers) return null
+  if (typeof headers.get === 'function') return headers.get(name)
+  const value = headers[name] ?? headers[name.toLowerCase()]
+  return Array.isArray(value) ? value[0] : value ?? null
+}
+
+export async function resolveSafeStreamUrl(raw, options = {}) {
+  const lookup = options.lookup ?? defaultLookup
   let current = String(raw)
   for (let hop = 0; hop < 5; hop += 1) {
     const url = await assertResolvedPublicUrl(current, lookup)
-    const response = await fetchImpl(url.toString(), {
-      method: 'GET',
-      redirect: 'manual',
-      signal: AbortSignal.timeout(10_000),
-    })
-    const status = response.status ?? 200
+    let response
+    try {
+      if (options.requestImpl) response = await options.requestImpl(url.toString())
+      else if (options.fetchImpl) {
+        response = await options.fetchImpl(url.toString(), {
+          method: 'GET',
+          redirect: 'manual',
+          signal: AbortSignal.timeout(10_000),
+        })
+      } else response = await probeStream(url)
+    } catch (error) {
+      if (isProtocolParseError(error)) return url.toString()
+      if (error instanceof SourceError) throw error
+      throw new SourceError('invalid_url', 'Could not check that audio URL.')
+    }
+    const status = response.status ?? response.statusCode ?? 200
     if (status >= 300 && status < 400) {
-      const location = response.headers?.get?.('location')
+      const location = headerValue(response.headers, 'location')
       if (!location) throw new SourceError('invalid_url', 'Redirect was empty.')
       current = new URL(location, url).toString()
       continue
@@ -244,6 +299,16 @@ export function classifySource(input, options = {}) {
   }
   const trimmed = input.trim()
   if (!looksLikeUrl(trimmed)) {
+    const host = trimmed.split(/[/?#]/)[0]
+    if (host && !host.includes(' ') && !host.includes(':')) {
+      if (isYouTubeHost(host)) throw new SourceError('youtube', 'YouTube is not supported.')
+      if (isBlockedService(host)) {
+        throw new SourceError(
+          'not_a_source',
+          'Spotify and Apple Music are not playback sources, and this bot does not import their playlists.',
+        )
+      }
+    }
     if (kind === 'direct' || kind === 'radio') {
       throw new SourceError('unsupported', 'A direct or radio source needs a URL.')
     }

@@ -117,16 +117,18 @@ export function finishCurrent(state, { natural }) {
     }
   }
   if (natural && state.loop === 'song' && !state.current.failed) {
+    const current = { ...state.current, failed: false }
     return {
-      state: { ...state, offsetMs: 0, paused: false, startedAt: null },
-      track: state.current,
+      state: { ...state, current, offsetMs: 0, paused: false, startedAt: null },
+      track: current,
       autoplay: false,
     }
   }
   if (natural && state.loop === 'queue' && !state.current.failed) {
+    const replayed = { ...state.current, failed: false }
     const rotated = promote({
       ...state,
-      tracks: [...state.tracks, state.current],
+      tracks: [...state.tracks, replayed],
       current: null,
     })
     return {
@@ -146,7 +148,7 @@ export function finishCurrent(state, { natural }) {
 
 export function back(state, maxSize = Number.POSITIVE_INFINITY) {
   if (state.history.length === 0) return { ok: false, error: 'no_history', state }
-  const track = state.history[state.history.length - 1]
+  const track = { ...state.history[state.history.length - 1], failed: false }
   const history = state.history.slice(0, -1)
   const tracks = state.current ? [state.current, ...state.tracks] : state.tracks.slice()
   if (tracks.length > maxSize) return { ok: false, error: 'queue_full', state }

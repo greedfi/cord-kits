@@ -98,6 +98,28 @@ describe('player panel', () => {
     })
     await forgetting.push('111111111111111111', 'action')
     assert.equal(panels.get('111111111111111111'), null)
+
+    const idleEdits = []
+    const idlePanels = createPanels({
+      store: saved,
+      editMessage: async (_target, body) => { idleEdits.push(body) },
+      sendMessage: async () => ({ id: 'idle' }),
+    })
+    saved.put('111111111111111111', {
+      panelChannelId: '222222222222222222',
+      panelMessageId: '333333333333333333',
+    })
+    const idleLoop = createProgressLoop({
+      music: { snapshot: () => snapshot(null) },
+      panels: idlePanels,
+      now: () => PROGRESS_INTERVAL_MS,
+      schedule: () => ({ cancel() {} }),
+      interval: () => ({ cancel() {} }),
+    })
+    await idleLoop.push('111111111111111111', 'action')
+    await idleLoop.push('111111111111111111', 'progress')
+    assert.equal(idleEdits.length, 1)
+    assert.match(idleEdits[0].embeds[0].toJSON().title, /Nothing playing/)
   })
 
   test('forgets the panel on unknown channel and missing access too', async () => {

@@ -161,12 +161,14 @@ export function createRuntime({
     fsImpl,
     now,
   })
+  let progress
   const music = musicOverride ?? createMusic(config, {
     stateStore: store,
     now,
     schedule,
     fetchChannel: (guildId, channelId) => fetchVoiceChannel(client, guildId, channelId),
     setVoiceStatus: (channel, text) => pushVoiceStatus({ rest: client.rest, channel, text }),
+    onPlaybackChange: (guildId) => progress?.push(guildId, 'action'),
   })
   const panels = createPanels({
     store,
@@ -176,7 +178,7 @@ export function createRuntime({
     },
     sendMessage: (channel, body) => channel.send(body),
   })
-  const progress = createProgressLoop({ music, panels, now, schedule })
+  progress = createProgressLoop({ music, panels, now, schedule })
   const app = createApp({
     config,
     music,
