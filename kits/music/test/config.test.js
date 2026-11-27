@@ -107,6 +107,24 @@ describe('music config', () => {
     }
   })
 
+  test('a guild update can clear a role and a bad update keeps the last good file', () => {
+    const { dir, store } = storeFrom(JSON.stringify(example))
+    try {
+      store.update((draft) => {
+        draft.guilds['111111111111111111'].djRoleId = null
+      })
+      assert.equal(store.get().guilds['111111111111111111'].djRoleId, null)
+      assert.throws(() => store.update((draft) => {
+        draft.defaultVolume = 500
+      }), ConfigError)
+      assert.equal(store.get().defaultVolume, 50)
+      assert.equal(store.get().guilds['111111111111111111'].djRoleId, null)
+    } finally {
+      store.close()
+      dir.remove()
+    }
+  })
+
   test('fs.watch reloads a good file and ignores a bad write', async () => {
     const errors = []
     const { dir, filePath, store } = storeFrom(`${JSON.stringify(example)}\n`, {

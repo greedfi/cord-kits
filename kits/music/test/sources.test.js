@@ -116,6 +116,19 @@ describe('source resolution', () => {
     )
   })
 
+  test('a name is a SoundCloud search and Spotify or Apple links are refused', () => {
+    const search = classifySource('a calm song')
+    assert.equal(search.kind, 'search')
+    assert.equal(search.query, 'a calm song')
+    for (const url of [
+      'https://open.spotify.com/track/abc',
+      'https://music.apple.com/us/album/example/1',
+      'spotify:track:abc',
+    ]) {
+      assert.throws(() => classifySource(url), (error) => error.code === 'not_a_source', url)
+    }
+  })
+
   test('a file named youtube.mp3 on another host is direct audio', () => {
     const source = classifySource('https://cdn.example.com/youtube.mp3')
     assert.equal(source.kind, 'direct')

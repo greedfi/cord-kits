@@ -1,10 +1,25 @@
 {
   "defaultVolume": 50,
   "maxQueueSize": 100,
+  "extendedQueue": false,
+  "autoplay": false,
+  "stayConnected": false,
+  "filter": "off",
   "guilds": {
     "111111111111111111": {
       "defaultVolume": 40,
-      "maxQueueSize": 50
+      "maxQueueSize": 50,
+      "extendedQueue": false,
+      "autoplay": false,
+      "stayConnected": false,
+      "filter": "off",
+      "djRoleId": "222222222222222222",
+      "djOnly": ["skip", "stop"],
+      "textChannels": [],
+      "voiceChannels": [],
+      "requestChannelId": null,
+      "requestAutoDelete": false,
+      "requestCommandsOnly": false
     }
   }
 }

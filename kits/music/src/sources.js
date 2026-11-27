@@ -97,6 +97,13 @@ function isSoundCloudHost(hostname) {
   return host === 'soundcloud.com' || host.endsWith('.soundcloud.com')
 }
 
+const BLOCKED_SERVICES = ['spotify.com', 'music.apple.com', 'itunes.apple.com']
+
+function isBlockedService(hostname) {
+  const host = bareHost(hostname)
+  return BLOCKED_SERVICES.some((name) => host === name || host.endsWith(`.${name}`))
+}
+
 function extensionOf(pathname) {
   const base = pathname.split('/').pop() ?? ''
   if (!base.includes('.')) return ''
@@ -133,6 +140,12 @@ export function assertPublicHttpUrl(raw) {
   if (isYouTubeHost(url.hostname)) {
     throw new SourceError('youtube', 'YouTube is not supported.')
   }
+  if (isBlockedService(url.hostname)) {
+    throw new SourceError(
+      'not_a_source',
+      'Spotify and Apple Music are not playback sources, and this bot does not import their playlists.',
+    )
+  }
   if (isBlockedHost(url.hostname)) {
     throw new SourceError('blocked_host', 'That host is not allowed.')
   }
@@ -162,9 +175,29 @@ export function classifySource(input, options = {}) {
   if (!KINDS.has(kind)) throw new SourceError('unsupported', 'Unknown source kind.')
   if (options.attachment) return classifyAttachment(options.attachment, kind)
   if (typeof input !== 'string' || input.trim() === '') {
-    throw new SourceError('empty', 'Provide a URL or an audio attachment.')
+    throw new SourceError('empty', 'Provide a song name, a URL, or an audio attachment.')
   }
-  const url = assertPublicHttpUrl(input.trim())
+  const trimmed = input.trim()
+  let parsed = null
+  try {
+    parsed = new URL(trimmed)
+  } catch {
+    parsed = null
+  }
+  if (/^spotify:/i.test(trimmed)) {
+    throw new SourceError(
+      'not_a_source',
+      'Spotify and Apple Music are not playback sources, and this bot does not import their playlists.',
+    )
+  }
+  if (!parsed || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) {
+    if (parsed) throw new SourceError('invalid_url', 'Only http and https URLs are supported.')
+    if (kind === 'direct' || kind === 'radio') {
+      throw new SourceError('unsupported', 'A direct or radio source needs a URL.')
+    }
+    return { kind: 'search', query: trimmed.slice(0, 200) }
+  }
+  const url = assertPublicHttpUrl(trimmed)
   const ext = extensionOf(url.pathname)
 
   if (kind === 'soundcloud') {

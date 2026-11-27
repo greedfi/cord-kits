@@ -4,40 +4,56 @@
   "title": "Music kit config",
   "type": "object",
   "additionalProperties": false,
-  "required": ["defaultVolume", "maxQueueSize", "guilds"],
+  "required": ["defaultVolume", "maxQueueSize", "extendedQueue", "autoplay", "stayConnected", "filter", "guilds"],
   "properties": {
-    "defaultVolume": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 100,
-      "description": "Playback volume from 0 to 100 when a guild has no override."
-    },
-    "maxQueueSize": {
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 500,
-      "description": "Maximum number of tracks waiting per guild, not counting the track that is playing."
-    },
+    "defaultVolume": { "type": "integer", "minimum": 0, "maximum": 100 },
+    "maxQueueSize": { "type": "integer", "minimum": 1, "maximum": 1000 },
+    "extendedQueue": { "type": "boolean" },
+    "autoplay": { "type": "boolean" },
+    "stayConnected": { "type": "boolean" },
+    "filter": { "enum": ["off", "bassboost", "nightcore", "8d"] },
     "guilds": {
       "type": "object",
-      "propertyNames": {
-        "pattern": "^[0-9]{17,20}$"
-      },
-      "additionalProperties": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "defaultVolume": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 100
-          },
-          "maxQueueSize": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 500
+      "propertyNames": { "pattern": "^[0-9]{17,20}$" },
+      "additionalProperties": { "$ref": "#/$defs/guild" }
+    }
+  },
+  "$defs": {
+    "guild": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "defaultVolume": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "maxQueueSize": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "extendedQueue": { "type": "boolean" },
+        "autoplay": { "type": "boolean" },
+        "stayConnected": { "type": "boolean" },
+        "filter": { "enum": ["off", "bassboost", "nightcore", "8d"] },
+        "djRoleId": { "type": ["string", "null"], "pattern": "^[0-9]{17,20}$" },
+        "djOnly": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "play", "playskip", "playtop", "search", "pause", "resume", "skip", "back",
+              "replay", "stop", "loop", "shuffle", "move", "remove", "clear", "seek",
+              "forward", "rewind", "volume", "join", "leave", "sleep", "filter", "playlist"
+            ]
           }
-        }
+        },
+        "textChannels": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[0-9]{17,20}$" }
+        },
+        "voiceChannels": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[0-9]{17,20}$" }
+        },
+        "requestChannelId": { "type": ["string", "null"], "pattern": "^[0-9]{17,20}$" },
+        "requestAutoDelete": { "type": "boolean" },
+        "requestCommandsOnly": { "type": "boolean" }
       }
     }
   }

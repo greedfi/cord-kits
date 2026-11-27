@@ -1,6 +1,6 @@
 # cord-kits
 
-Tested discord.js v14 starter kits for .cord. Each kit lives in its own folder, targets Node.js 20 or newer, and ships with unit tests. The music kit plays SoundCloud, direct audio, internet radio, and attachments. It rejects YouTube and does not depend on ytdl, play-dl, or yt-dlp. The moderator kit filters words and links, runs warn / timeout / kick / ban / purge, writes a mod log, and can put a server into raid mode.
+Tested discord.js v14 starter kits for .cord. Each kit lives in its own folder and ships with unit tests. The music kit requires Node.js 22.12 or newer because `@discordjs/voice` 0.19.2 declares that engine. The moderator kit targets Node.js 20 or newer. CI runs both on Node.js 22. The music kit plays SoundCloud, direct audio, internet radio, and attachments. It rejects YouTube and does not depend on ytdl, play-dl, or yt-dlp. The moderator kit filters words and links, runs warn / timeout / kick / ban / purge, writes a mod log, and can put a server into raid mode.
 
 | Kit | Path |
 | --- | --- |
@@ -11,14 +11,14 @@ Neither invite asks for Administrator.
 
 ## Music
 
-Intents: `Guilds`, `GuildVoiceStates`. Neither is privileged.
+Intents: `Guilds`, `GuildVoiceStates`. Neither is privileged. The song-request channel is off unless `ENABLE_REQUEST_CHANNEL` is set, which adds `GuildMessages` and the privileged Message Content intent. See [kits/music](kits/music).
 
-Permissions: View Channel, Send Messages, Connect, Speak.
+Permissions: View Channel, Send Messages, Embed Links, Connect, Speak.
 
-Permission integer: **3148800**
+Permission integer: **3165184**
 
 ```
-https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot%20applications.commands&permissions=3148800
+https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot%20applications.commands&permissions=3165184
 ```
 
 ## Moderator
@@ -54,7 +54,7 @@ Secrets stay in the environment: `DISCORD_BOT_TOKEN`, `CLIENT_ID`, and optional 
 
 ## Tests
 
-GitHub Actions runs lint and `node --test` on Node.js 20 for both kits.
+GitHub Actions runs lint and `node --test` on Node.js 22 for both kits. Node.js 22 satisfies the music kit's engine. The moderator kit does not require it.
 
 ```bash
 cd kits/music && npm ci && npm run lint && npm test
@@ -63,7 +63,7 @@ cd kits/moderator && npm ci && npm run lint && npm test
 
 ## Hosting
 
-Each kit has a `Dockerfile` based on `node:20-slim`. The music image also installs ffmpeg. `railway.json` sets `restartPolicyType` to `ALWAYS` so the process comes back if it exits. Set the Railway service root to the kit directory (`kits/music` or `kits/moderator`), set the token and client id as variables, and provide `config.json` at `/app/config.json` or via `CONFIG_PATH`.
+The moderator image uses `node:20-slim`. The music image uses `node:22-slim`, checks that Node is 22.12 or newer, and installs ffmpeg. `railway.json` sets `restartPolicyType` to `ALWAYS` so the process comes back if it exits. Music is a Discord Gateway and voice process. It is not a serverless function, and a host that sleeps when idle drops the voice connection. Railway bills for the always-on service. This repository does not promise free hosting. Set the Railway service root to the kit directory (`kits/music` or `kits/moderator`), set the token and client id as variables, and provide `config.json` at `/app/config.json` or via `CONFIG_PATH`. Music playlists and 24/7 state live under `DATA_DIR` (default `data/`). Mount a volume there.
 
 ## Releases
 
