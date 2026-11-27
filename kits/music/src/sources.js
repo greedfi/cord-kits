@@ -97,6 +97,15 @@ function isSoundCloudHost(hostname) {
   return host === 'soundcloud.com' || host.endsWith('.soundcloud.com')
 }
 
+function isClosedCatalogHost(hostname) {
+  const host = bareHost(hostname)
+  return host === 'spotify.com'
+    || host.endsWith('.spotify.com')
+    || host === 'music.apple.com'
+    || host.endsWith('.music.apple.com')
+    || host === 'itunes.apple.com'
+}
+
 function extensionOf(pathname) {
   const base = pathname.split('/').pop() ?? ''
   if (!base.includes('.')) return ''
@@ -132,6 +141,12 @@ export function assertPublicHttpUrl(raw) {
   }
   if (isYouTubeHost(url.hostname)) {
     throw new SourceError('youtube', 'YouTube is not supported.')
+  }
+  if (isClosedCatalogHost(url.hostname)) {
+    throw new SourceError(
+      'unavailable_catalog',
+      'Spotify and Apple Music audio is not supported. Their playlists are not imported: track lists need developer credentials, and this bot does not scrape those sites.',
+    )
   }
   if (isBlockedHost(url.hostname)) {
     throw new SourceError('blocked_host', 'That host is not allowed.')
@@ -192,4 +207,22 @@ export function classifySource(input, options = {}) {
     'unsupported',
     'Unsupported source. Use SoundCloud, a direct audio file, a radio stream, or an attachment.',
   )
+}
+
+export function interpretQuery(input, options = {}) {
+  const kind = options.kind ?? 'auto'
+  if (options.attachment) {
+    return { mode: 'url', classified: classifySource(null, options) }
+  }
+  if (typeof input !== 'string' || input.trim() === '') {
+    throw new SourceError('empty', 'Provide a URL, a track name, or an audio attachment.')
+  }
+  const text = input.trim()
+  if (/^https?:\/\//i.test(text)) {
+    return { mode: 'url', classified: classifySource(text, options) }
+  }
+  if (kind !== 'auto' && kind !== 'soundcloud') {
+    throw new SourceError('unsupported', 'A name search only works for SoundCloud. Pass a URL for direct audio or radio.')
+  }
+  return { mode: 'search', query: text.slice(0, 200) }
 }

@@ -5,7 +5,7 @@
   "description": "Discord music starter kit: SoundCloud, direct audio, radio streams, and attachments. No YouTube.",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12.0"
   },
   "scripts": {
     "start": "node src/index.js",

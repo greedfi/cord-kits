@@ -85,6 +85,23 @@ describe('music config', () => {
     }
   })
 
+  test('an invalid DJ role on reload keeps the last good config', () => {
+    const { dir, filePath, store } = storeFrom(JSON.stringify(example))
+    try {
+      writeFileSync(filePath, JSON.stringify({
+        ...example,
+        guilds: { ...example.guilds, '111111111111111111': { djRoleId: 'nope' } },
+      }))
+      const result = store.reloadFromDisk()
+      assert.equal(result.ok, false)
+      assert.equal(store.get().defaultVolume, 50)
+      assert.equal(store.get().guilds['111111111111111111'].djRoleId, '222222222222222222')
+    } finally {
+      store.close()
+      dir.remove()
+    }
+  })
+
   test('a schema failure on reload keeps the last good config', () => {
     const errors = []
     const { dir, filePath, store } = storeFrom(JSON.stringify(example), {

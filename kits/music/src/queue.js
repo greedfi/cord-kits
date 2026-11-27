@@ -1,13 +1,26 @@
 export function createQueueState(volume = 50) {
-  return { current: null, tracks: [], volume }
+  return {
+    current: null,
+    tracks: [],
+    previous: [],
+    volume,
+    loop: 'off',
+    shuffle: false,
+    filter: 'off',
+    paused: false,
+    positionMs: 0,
+    startedAt: null,
+    stale: false,
+  }
 }
 
-export function safeLabel(value) {
+export function safeLabel(value, max = 80) {
   const text = String(value ?? '')
     .replace(/[*_`~<>@]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
-  return text.slice(0, 80) || 'Untitled'
+  const cap = Number.isInteger(max) && max > 0 ? max : 80
+  return text.slice(0, cap) || 'Untitled'
 }
 
 export function enqueue(state, track, maxSize) {
@@ -53,7 +66,90 @@ export function skip(state) {
 }
 
 export function stop(state) {
-  return { ...state, current: null, tracks: [] }
+  return {
+    ...state,
+    current: null,
+    tracks: [],
+    previous: [],
+    paused: false,
+    positionMs: 0,
+    startedAt: null,
+    stale: false,
+  }
+}
+
+export function insertManyFront(state, tracks, maxSize) {
+  const room = maxSize - state.tracks.length
+  if (room <= 0) {
+    return {
+      ok: false,
+      error: 'queue_full',
+      state,
+      accepted: [],
+      rejected: tracks.length,
+    }
+  }
+  const accepted = tracks.slice(0, room)
+  return {
+    ok: true,
+    error: null,
+    state: { ...state, tracks: [...accepted, ...state.tracks] },
+    accepted,
+    rejected: tracks.length - accepted.length,
+  }
+}
+
+export function removeAt(state, index) {
+  if (!Number.isInteger(index) || index < 1 || index > state.tracks.length) {
+    return { ok: false, error: 'range', state }
+  }
+  const tracks = state.tracks.slice()
+  const [removed] = tracks.splice(index - 1, 1)
+  return { ok: true, error: null, state: { ...state, tracks }, removed }
+}
+
+export function moveTrack(state, from, to) {
+  if (!Number.isInteger(from) || !Number.isInteger(to) || from < 1 || to < 1) {
+    return { ok: false, error: 'range', state }
+  }
+  if (from > state.tracks.length || to > state.tracks.length) {
+    return { ok: false, error: 'range', state }
+  }
+  if (from === to) return { ok: true, error: null, state }
+  const tracks = state.tracks.slice()
+  const [item] = tracks.splice(from - 1, 1)
+  tracks.splice(to - 1, 0, item)
+  return { ok: true, error: null, state: { ...state, tracks } }
+}
+
+const LOOP_ORDER = ['off', 'song', 'queue']
+
+export function setLoop(state, mode) {
+  if (!LOOP_ORDER.includes(mode)) throw new RangeError('Loop must be song, queue, or off.')
+  return { ...state, loop: mode }
+}
+
+export function cycleLoop(state) {
+  const index = LOOP_ORDER.indexOf(state.loop)
+  const loop = LOOP_ORDER[(index + 1) % LOOP_ORDER.length]
+  return { ...state, loop }
+}
+
+export function toggleShuffle(state, random = Math.random) {
+  if (state.shuffle) return { ...state, shuffle: false }
+  const tracks = state.tracks.slice()
+  for (let index = tracks.length - 1; index > 0; index -= 1) {
+    const swap = Math.floor(random() * (index + 1))
+    const current = tracks[index]
+    tracks[index] = tracks[swap]
+    tracks[swap] = current
+  }
+  return { ...state, tracks, shuffle: true }
+}
+
+export function pushPrevious(state, track, cap = 50) {
+  if (!track) return state.previous ?? []
+  return [...(state.previous ?? []), track].slice(-cap)
 }
 
 export function setVolume(state, volume) {
