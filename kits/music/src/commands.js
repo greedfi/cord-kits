@@ -17,20 +17,13 @@ function queryOption(option, description) {
   return option.setName('query').setDescription(description).setRequired(false).setMaxLength(200)
 }
 
-function playOptions(builder) {
-  return builder
-    .addStringOption((option) => queryOption(option, 'Song name, SoundCloud link, direct audio URL, or radio stream'))
-    .addAttachmentOption((option) => option.setName('file').setDescription('Audio file to play').setRequired(false))
+function queryCommand(name, description) {
+  return command(name, description, connect)
     .addStringOption((option) => option
-      .setName('kind')
-      .setDescription('How to read a URL. A name is always a SoundCloud search.')
-      .setRequired(false)
-      .addChoices(
-        { name: 'Auto', value: 'auto' },
-        { name: 'SoundCloud', value: 'soundcloud' },
-        { name: 'Direct audio', value: 'direct' },
-        { name: 'Radio stream', value: 'radio' },
-      ))
+      .setName('query')
+      .setDescription('Song name, SoundCloud link, direct audio URL, or radio stream')
+      .setRequired(true)
+      .setMaxLength(200))
 }
 
 const playlist = command('playlist', 'Save and play lists of tracks on this server.', connect)
@@ -99,9 +92,11 @@ const settings = command('settings', 'Show or change this server\'s playback def
     .addBooleanOption((option) => option.setName('enabled').setDescription('Turn 24/7 mode on or off').setRequired(true)))
 
 export const commands = [
-  playOptions(command('play', 'Play a song by name or URL, or an audio attachment.', connect)),
-  playOptions(command('playskip', 'Replace the current song and play this now.', connect)),
-  playOptions(command('playtop', 'Add a song to the front of the queue.', connect)),
+  queryCommand('play', 'Play a song by name or URL.'),
+  command('playfile', 'Play an audio attachment.', connect)
+    .addAttachmentOption((option) => option.setName('file').setDescription('Audio file to play').setRequired(true)),
+  queryCommand('playskip', 'Replace the current song and play this now.'),
+  queryCommand('playtop', 'Add a song to the front of the queue.'),
   command('search', 'Search SoundCloud and pick a result.', connect)
     .addStringOption((option) => option.setName('query').setDescription('Song name').setRequired(true).setMaxLength(200)),
   command('pause', 'Pause playback.', connect),

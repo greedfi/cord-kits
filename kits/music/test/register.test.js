@@ -147,6 +147,28 @@ describe('command registration', () => {
     assert.equal(puts(rest, Routes.applicationGuildCommands(clientId, otherGuildId)).length, 0)
   })
 
+  test('a play command that still has extra options is registered again', async () => {
+    const rest = memoryRest()
+    const route = Routes.applicationCommands(clientId)
+    const stale = commandData().map((command) => (
+      command.name === 'play'
+        ? {
+          ...command,
+          options: [
+            ...command.options,
+            { type: 3, name: 'kind', description: 'How to read a URL.', required: false },
+          ],
+        }
+        : command
+    ))
+    rest.seed(route, stale)
+    const result = await syncCommands({ rest, clientId })
+    assert.equal(result.updated, true)
+    assert.equal(puts(rest, route).length, 1)
+    const stored = await rest.get(route)
+    assert.deepEqual(stored.find((command) => command.name === 'play').options.map((option) => option.name), ['query'])
+  })
+
   test('the active scope clears commands on the other scope', async () => {
     const guildRoute = Routes.applicationGuildCommands(clientId, guildId)
     const globalRoute = Routes.applicationCommands(clientId)

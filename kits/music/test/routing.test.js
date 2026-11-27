@@ -2,6 +2,7 @@ import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { PermissionFlagsBits } from 'discord.js'
 import { createApp } from '../src/handlers.js'
+import { resolveTracks } from '../src/resolve.js'
 import { createPlaylistStore } from '../src/playlists.js'
 import { baseConfig, memoryConfig, mockInteraction, stubMusic } from './mock.js'
 import { tempDir } from './helpers.js'
@@ -222,5 +223,130 @@ describe('command routing', () => {
     } finally {
       dir.remove()
     }
+  })
+
+  test('play auto-detects a name, SoundCloud, a file, and a radio stream, and playfile queues an attachment', async () => {
+    const music = stubMusic()
+    const seen = []
+    const clientId = 'a'.repeat(32)
+    const fetchImpl = async (url) => {
+      const address = String(url)
+      const track = address.includes('/search/tracks')
+        ? {
+          collection: [{
+            kind: 'track',
+            id: 9,
+            title: 'Dancing Queen',
+            permalink_url: 'https://soundcloud.com/abba/dancing-queen',
+            user: { username: 'ABBA' },
+          }],
+        }
+        : {
+          kind: 'track',
+          id: 4,
+          title: 'Song',
+          permalink_url: 'https://soundcloud.com/artist/song',
+          user: { username: 'Artist' },
+        }
+      return { ok: true, status: 200, async json() { return track } }
+    }
+    const requestImpl = async () => ({
+      status: 200,
+      headers: { 'content-type': 'audio/mpeg', 'icy-name': 'Station' },
+    })
+    const app = createApp({
+      config: memoryConfig(structuredClone(baseConfig)),
+      music,
+      requestChannel: false,
+      now: () => 1_000,
+      resolveTracks: (input) => {
+        seen.push(input)
+        return resolveTracks(input, { fetchImpl, requestImpl, clientId, lookup: async () => [{ address: '1.1.1.1', family: 4 }] })
+      },
+    })
+    const cases = [
+      { commandName: 'play', options: { query: 'dancing queen' } },
+      { commandName: 'play', options: { query: 'https://soundcloud.com/artist/song' } },
+      { commandName: 'play', options: { query: 'https://cdn.example.com/song.mp3' } },
+      { commandName: 'play', options: { query: 'https://radio.example.com/station' } },
+      {
+        commandName: 'playfile',
+        options: {
+          file: {
+            url: 'https://cdn.discordapp.com/attachments/1/2/voice.mp3',
+            name: 'voice.mp3',
+            contentType: 'audio/mpeg',
+            size: 1000,
+          },
+        },
+      },
+    ]
+    for (const item of cases) {
+      const command = mockInteraction({ ...item, botChannelId: null })
+      await app.handleInteraction(command.interaction)
+    }
+    assert.deepEqual(seen.map((input) => input.query ?? input.attachment.name), [
+      'dancing queen',
+      'https://soundcloud.com/artist/song',
+      'https://cdn.example.com/song.mp3',
+      'https://radio.example.com/station',
+      'voice.mp3',
+    ])
+    assert.equal(seen.some((input) => input.kind != null), false)
+    const played = music.calls.filter((call) => call[0] === 'play')
+    assert.equal(played.length, 5)
+    assert.equal(played[0][3][0].kind, 'soundcloud')
+    assert.equal(played[0][3][0].title, 'Dancing Queen')
+    assert.equal(played[1][3][0].kind, 'soundcloud')
+    assert.equal(played[1][3][0].url, 'https://soundcloud.com/artist/song')
+    assert.equal(played[2][3][0].kind, 'direct')
+    assert.equal(played[3][3][0].kind, 'radio')
+    assert.equal(played[4][3][0].kind, 'attachment')
+    assert.equal(played[4][4], 'end')
+  })
+
+  test('playfile follows the DJ and voice permission checks for play', async () => {
+    const music = stubMusic()
+    const config = memoryConfig(structuredClone(baseConfig))
+    config.update((draft) => {
+      draft.guilds[guild].djOnly = ['play']
+    })
+    const app = createApp({
+      config,
+      music,
+      requestChannel: false,
+      now: () => 1_000,
+      resolveTracks: async () => [{ kind: 'attachment', title: 'Voice', url: 'https://cdn.discordapp.com/a.mp3' }],
+    })
+    const file = {
+      url: 'https://cdn.discordapp.com/attachments/1/2/voice.mp3',
+      name: 'voice.mp3',
+      contentType: 'audio/mpeg',
+      size: 1000,
+    }
+    const denied = mockInteraction({
+      commandName: 'playfile',
+      options: { file },
+      botChannelId: null,
+    })
+    await app.handleInteraction(denied.interaction)
+    assert.match(text(denied.replies), /DJ role/)
+    assert.equal(music.calls.length, 0)
+    const quiet = mockInteraction({
+      commandName: 'playfile',
+      options: { file },
+      botChannelId: null,
+      roles: ['555555555555555555'],
+      voiceChannel: {
+        id: '444444444444444444',
+        type: 2,
+        permissionsFor() {
+          return { has: (bit) => bit !== PermissionFlagsBits.Speak }
+        },
+      },
+    })
+    await app.handleInteraction(quiet.interaction)
+    assert.match(text(quiet.replies), /I need Speak in <#444444444444444444>/)
+    assert.equal(music.calls.length, 0)
   })
 })

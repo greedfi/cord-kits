@@ -32,10 +32,17 @@ describe('music commands', () => {
     }
     const play = commands.find((command) => command.name === 'play')
     assert.equal(BigInt(play.default_member_permissions), PermissionFlagsBits.Connect)
-    const query = play.options.find((option) => option.name === 'query')
-    assert.equal(query.required, false)
-    const kind = play.options.find((option) => option.name === 'kind')
-    assert.deepEqual(kind.choices.map((choice) => choice.value), ['auto', 'soundcloud', 'direct', 'radio'])
+    assert.deepEqual(play.options.map((option) => option.name), ['query'])
+    assert.equal(play.options[0].required, true)
+    for (const name of ['playskip', 'playtop']) {
+      const command = commands.find((entry) => entry.name === name)
+      assert.deepEqual(command.options.map((option) => option.name), ['query'])
+      assert.equal(command.options[0].required, true)
+    }
+    const playfile = commands.find((command) => command.name === 'playfile')
+    assert.deepEqual(playfile.options.map((option) => option.name), ['file'])
+    assert.equal(playfile.options[0].required, true)
+    assert.equal(playfile.options[0].type, 11)
     const settings = commands.find((command) => command.name === 'settings')
     assert.equal(BigInt(settings.default_member_permissions), PermissionFlagsBits.ManageGuild)
     const playlist = commands.find((command) => command.name === 'playlist')

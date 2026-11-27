@@ -1,6 +1,6 @@
 # Music kit
 
-A discord.js v14 music bot with a queue per server. Sources are SoundCloud (links and search), direct audio files, internet radio, and uploaded attachments. YouTube links are rejected. Spotify and Apple Music are rejected too. This kit does not use ytdl, play-dl, or yt-dlp.
+A discord.js v14 music bot with a queue per server. `/play` takes a song name or a URL. SoundCloud links, direct audio files, and radio streams are detected automatically. A name plays the top SoundCloud result. Uploaded files use `/playfile`. YouTube links are rejected. Spotify and Apple Music are rejected too. This kit does not use ytdl, play-dl, or yt-dlp.
 
 Requires Node.js 22.12 or newer. `@discordjs/voice` 0.19.2 is pinned because Discord voice needs the DAVE protocol, and that package declares `engines.node` of `>=22.12.0`. This kit sets the same engine and `engine-strict=true`, so npm refuses to install it on Node.js 20 instead of warning and continuing. CI and the Docker image use Node.js 22.
 
@@ -96,9 +96,10 @@ Only one scope is kept. Guild mode clears this app's global commands. Global mod
 
 | Command | Behavior |
 | --- | --- |
-| `/play` | Name, URL, or file. A name plays the top SoundCloud result. |
-| `/playskip` | Play this now and move the old song to history. |
-| `/playtop` | Add to the front of the queue. |
+| `/play` | One required query: a song name or a URL. SoundCloud, audio files, and radio are detected. A name plays the top SoundCloud result. |
+| `/playfile` | Play one required audio attachment. Same queue and permission checks as `/play`. |
+| `/playskip` | Play one query now and move the old song to history. |
+| `/playtop` | Add one query to the front of the queue. |
 | `/search` | SoundCloud results in a select menu. |
 | `/pause` `/resume` `/skip` `/back` `/replay` | Player controls. |
 | `/stop` `/leave` | Stop and disconnect. |
@@ -159,7 +160,7 @@ Do not treat this list as done until someone runs it on a Discord server.
 
 - [ ] Invite with `3165184` and compare the permission screen. It does not include Administrator.
 - [ ] Confirm ffmpeg and a voice connection on Node.js 22.12 or newer.
-- [ ] Play a SoundCloud URL, a searched name, a direct URL, a radio stream, and an attachment.
+- [ ] With `/play`, play a SoundCloud URL, a searched name, a direct URL, and a radio stream. Play an attachment with `/playfile`.
 - [ ] Use the player buttons: pause, resume, skip, back, loop, shuffle, stop. Watch the progress line update without a rate-limit failure.
 - [ ] Set a DJ role, deny a member, and confirm the same denial on a button.
 - [ ] Toggle a text channel and a voice channel.

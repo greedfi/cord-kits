@@ -1,5 +1,6 @@
 export const CONTROL_COMMANDS = [
   'play',
+  'playfile',
   'playskip',
   'playtop',
   'search',

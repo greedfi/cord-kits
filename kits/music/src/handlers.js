@@ -22,11 +22,11 @@ const NEEDS_SAME_VOICE = new Set([
   'remove', 'clear', 'seek', 'forward', 'rewind', 'volume', 'leave', 'sleep',
 ])
 const LOCKED = new Set([
-  'play', 'playskip', 'playtop', 'search', 'pause', 'resume', 'skip', 'back',
+  'play', 'playfile', 'playskip', 'playtop', 'search', 'pause', 'resume', 'skip', 'back',
   'replay', 'stop', 'loop', 'shuffle', 'move', 'remove', 'clear', 'seek',
   'forward', 'rewind', 'volume', 'join', 'leave', 'sleep', 'filter', 'playlist',
 ])
-const PLACEMENTS = { play: 'end', playskip: 'skip', playtop: 'top' }
+const PLACEMENTS = { play: 'end', playfile: 'end', playskip: 'skip', playtop: 'top' }
 const PLAYLIST_ERRORS = {
   bad_name: 'Playlist names are 1-32 characters and cannot include mentions.',
   too_many: 'This server already has 25 playlists.',
@@ -169,10 +169,10 @@ export function createApp(deps) {
 
   async function playResolved(interaction, placement) {
     const settings = settingsFor(interaction.guildId)
+    const file = interaction.commandName === 'playfile'
     const tracks = await resolveTracks({
-      query: interaction.options.getString('query'),
-      attachment: interaction.options.getAttachment('file'),
-      kind: interaction.options.getString('kind') ?? 'auto',
+      query: file ? null : interaction.options.getString('query'),
+      attachment: file ? interaction.options.getAttachment('file') : null,
       mode: 'play',
       limit: waitingLimit(settings),
     })
@@ -718,7 +718,10 @@ export function createApp(deps) {
       }
       const settings = settingsFor(interaction.guildId)
       let voiceCommand = interaction.commandName
-      if (interaction.commandName === 'playlist' && interaction.options.getSubcommand(false) === 'play') {
+      if (
+        interaction.commandName === 'playfile'
+        || (interaction.commandName === 'playlist' && interaction.options.getSubcommand(false) === 'play')
+      ) {
         voiceCommand = 'play'
       }
       const denial = authorize({

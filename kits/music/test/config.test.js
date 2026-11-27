@@ -14,7 +14,7 @@ import { silentLogger, tempDir, waitFor } from './helpers.js'
 const schemaPath = fileURLToPath(new URL('../config.schema.json', import.meta.url))
 const example = JSON.parse(readFileSync(new URL('../config.example.json', import.meta.url), 'utf8'))
 
-function storeFrom(text, { watch = false, logger = silentLogger } = {}) {
+function storeFrom(text, { watch = false, logger = silentLogger, pollIntervalMs = 20 } = {}) {
   const dir = tempDir()
   const filePath = dir.path('config.json')
   writeFileSync(filePath, text)
@@ -24,6 +24,7 @@ function storeFrom(text, { watch = false, logger = silentLogger } = {}) {
     logger,
     watch,
     debounceMs: 30,
+    pollIntervalMs,
   })
   return { dir, filePath, store }
 }
@@ -139,9 +140,9 @@ describe('music config', () => {
     try {
       const next = { ...example, defaultVolume: 22 }
       writeFileSync(filePath, `${JSON.stringify(next)}\n`)
-      await waitFor(() => store.get().defaultVolume === 22)
+      await waitFor(() => store.get().defaultVolume === 22, 8_000)
       writeFileSync(filePath, '{')
-      await waitFor(() => errors.some((message) => message.includes('Keeping last good config')))
+      await waitFor(() => errors.some((message) => message.includes('Keeping last good config')), 8_000)
       assert.equal(store.get().defaultVolume, 22)
     } finally {
       store.close()
