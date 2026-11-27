@@ -33,6 +33,8 @@ describe('SoundCloud parsing', () => {
   test('extracts script URLs and a client id', () => {
     const html = '<script src="https://a-v2.sndcdn.com/assets/app.js"></script><script src="https://example.com/nope.js"></script>'
     assert.deepEqual(extractScriptUrls(html), ['https://a-v2.sndcdn.com/assets/app.js'])
+    const queried = '<script src="https://a-v2.sndcdn.com/assets/app.js?v=10&x=1"></script>'
+    assert.deepEqual(extractScriptUrls(queried), ['https://a-v2.sndcdn.com/assets/app.js?v=10&x=1'])
     assert.equal(extractClientId('client_id:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"'), clientId)
     assert.equal(extractClientId('no id here'), null)
   })

@@ -1,6 +1,7 @@
 import { SourceError, assertPublicHttpUrl } from './sources.js'
 
 const USER_AGENT = 'cord-kits-music/0.1'
+// Bound on how many homepage scripts are fetched while looking for a client id.
 const MAX_DISCOVERY_SCRIPTS = 30
 const MAX_HTML_CHARS = 1_500_000
 const MAX_SCRIPT_CHARS = 2_000_000
@@ -16,7 +17,7 @@ export function clearClientIdCache() {
 
 export function extractScriptUrls(html) {
   const urls = new Set()
-  const pattern = /https:\/\/[^"'\\\s>]+\.js/g
+  const pattern = /https:\/\/[^"'\\\s>]+\.js(?:\?[^"'\\\s>]*)?/g
   for (const match of String(html).matchAll(pattern)) {
     const url = match[0]
     if (url.includes('sndcdn.com') || url.includes('soundcloud.com')) urls.add(url)

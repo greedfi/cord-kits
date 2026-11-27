@@ -48,9 +48,9 @@ npm run register
 npm start
 ```
 
-Secrets stay in the environment: `DISCORD_BOT_TOKEN`, `CLIENT_ID`, and optional `GUILD_ID` for guild-scoped command registration. `config.json` is per kit, keyed by guild id where a server has its own settings, and it reloads while the process is running. Invalid JSON or a schema failure keeps the last good config and logs an error. `.gitignore` ignores `.env` and `config.json`.
+Secrets stay in the environment: `DISCORD_BOT_TOKEN`, `CLIENT_ID`, and optional `GUILD_ID`. `config.json` is per kit, keyed by guild id where a server has its own settings, and it reloads while the process is running. Invalid JSON or a schema failure keeps the last good config and logs an error. `.gitignore` ignores `.env` and `config.json`.
 
-`npm run register` registers the kit's slash commands globally, or to `GUILD_ID` when that variable is set.
+The music bot registers its slash commands when it logs in. Leave `GUILD_ID` unset for global commands, which can take up to an hour to appear the first time and then survive a re-invite. Set `GUILD_ID` to register on one server immediately. `npm run register` still registers either kit by hand, globally or to `GUILD_ID`.
 
 ## Tests
 

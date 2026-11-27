@@ -67,8 +67,8 @@ cp config.example.json config.json
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `DISCORD_BOT_TOKEN` | yes | Bot token |
-| `CLIENT_ID` | yes for `npm run register` | Application id |
-| `GUILD_ID` | no | Register commands to one server. Omit for global commands. |
+| `CLIENT_ID` | yes for the invite link and `npm run register` | Application id. Startup uses the logged-in bot id when this is empty. |
+| `GUILD_ID` | no | Dev only. Register commands on one server so they update immediately. Leave unset for global commands. |
 | `SOUNDCLOUD_CLIENT_ID` | no | Public SoundCloud client id. The bot discovers one when this is empty. |
 | `ENABLE_REQUEST_CHANNEL` | no | `true` opts into the request channel and Message Content. |
 | `DATA_DIR` | no | Playlists and 24/7 state. Defaults to `./data`. |
@@ -81,11 +81,16 @@ The waiting queue defaults to 100 tracks. `extendedQueue` raises that to `maxQue
 Install ffmpeg on the host, or run the Docker image. Opus uses `opusscript`. Encryption uses Node's `aes-256-gcm`, with `libsodium-wrappers` as a fallback.
 
 ```bash
-npm run register
 npm start
 ```
 
-Global commands can take up to an hour to appear. Guild registration is immediate. Use one mode. If you registered to a guild and then go global, delete the guild commands in the Developer Portal so they are not listed twice.
+The process registers its own slash commands when it logs in, and again when it joins the dev server. A kick and re-invite does not need `npm run register`. That script remains for a manual or CI run and uses the same registration path.
+
+Leave `GUILD_ID` unset for global commands. Global commands can take up to an hour to show up the first time. After that they stay with the application, so a re-invite already has them. Set `GUILD_ID` while developing to register on that server only. Those commands appear immediately, and joining that server again registers them right away.
+
+Only one scope is kept. Guild mode clears this app's global commands. Global mode clears guild commands on servers the bot is in, including when it joins one. The manual script, run without a logged-in bot, updates the selected scope and clears global commands in guild mode. It does not walk every server.
+
+`npm run register` still works. A registration failure is logged without the bot token, and the process keeps running.
 
 ## Commands
 

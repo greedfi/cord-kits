@@ -6,6 +6,7 @@ import { Client, Events } from 'discord.js'
 import { configFilePath, createConfigStore, createLogger, loadSchema } from './config.js'
 import { isDirectRun, loadEnv, redact, requestChannelEnabled, requireEnv } from './env.js'
 import { REQUEST_CHANNEL_PERMISSIONS, gatewayIntents, inviteUrl } from './permissions.js'
+import { attachCommandSync } from './register.js'
 import { attachClient, createRuntime } from './runtime.js'
 
 const kitRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -28,6 +29,7 @@ export async function main() {
     allowedMentions: { parse: [] },
   })
   const runtime = createRuntime({ config, client, requestChannel })
+  attachCommandSync(client)
   attachClient(client, runtime)
   client.once(Events.ClientReady, (ready) => {
     console.log(`Logged in as ${ready.user.tag}`)

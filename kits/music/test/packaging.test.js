@@ -58,7 +58,11 @@ describe('music packaging', () => {
     assert.doesNotMatch(source, /createServer|listen\(/)
     const ci = readFileSync(path.join(root, '../../.github/workflows/ci.yml'), 'utf8')
     assert.match(ci, /node-version: 22/)
-    assert.match(ci, /kit: \[music, moderator\]/)
+    const listed = ci.match(/kit:\s*\[([^\]]+)\]/)
+    assert.ok(listed)
+    const kits = listed[1].split(',').map((name) => name.trim())
+    assert.ok(kits.includes('music'))
+    assert.ok(kits.includes('moderator'))
   })
 
   test('voice stack loads and resolves DAVE', async () => {
