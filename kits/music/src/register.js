@@ -17,7 +17,7 @@ function projectOption(option) {
     name: option.name,
     description: option.description,
   }
-  if (typeof option.required === 'boolean') projected.required = option.required
+  projected.required = option.required === true
   for (const key of ['min_length', 'max_length', 'min_value', 'max_value', 'autocomplete']) {
     if (option[key] != null) projected[key] = option[key]
   }
@@ -112,8 +112,14 @@ export async function registerCommands({ rest, env = process.env } = {}) {
   return result
 }
 
-function applicationId(client, env) {
-  return env.CLIENT_ID?.trim() || client.user?.id || null
+function applicationId(client, env, log = console) {
+  const loggedIn = client.application?.id || null
+  const configured = env.CLIENT_ID?.trim() || null
+  if (loggedIn && configured && loggedIn !== configured) {
+    const warn = typeof log.warn === 'function' ? log.warn.bind(log) : log.log.bind(log)
+    warn(`CLIENT_ID ${configured} does not match the logged-in application ${loggedIn}. Command registration uses ${loggedIn}.`)
+  }
+  return loggedIn || configured || client.user?.id || null
 }
 
 function guildIdsOf(client) {
@@ -129,7 +135,7 @@ export function attachCommandSync(client, options = {}) {
   async function sync({ guildId, guildIds, ready = client } = {}) {
     try {
       const activeGuild = guildId === undefined ? readGuildId(env) : guildId
-      const clientId = applicationId(ready, env)
+      const clientId = applicationId(ready, env, log)
       const result = await syncCommands({
         rest,
         clientId,
@@ -148,7 +154,7 @@ export function attachCommandSync(client, options = {}) {
   async function onGuild(guild) {
     try {
       const guildId = readGuildId(env)
-      const clientId = applicationId(client, env)
+      const clientId = applicationId(client, env, log)
       if (!clientId) throw new Error('CLIENT_ID should be the numeric application id.')
       if (guildId) {
         if (guild.id !== guildId) return null

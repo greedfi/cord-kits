@@ -67,7 +67,7 @@ cp config.example.json config.json
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `DISCORD_BOT_TOKEN` | yes | Bot token |
-| `CLIENT_ID` | yes for the invite link and `npm run register` | Application id. Startup uses the logged-in bot id when this is empty. |
+| `CLIENT_ID` | yes for the invite link and `npm run register` | Application id. The running bot registers with its logged-in application id and warns if this value differs. |
 | `GUILD_ID` | no | Dev only. Register commands on one server so they update immediately. Leave unset for global commands. |
 | `SOUNDCLOUD_CLIENT_ID` | no | Public SoundCloud client id. The bot discovers one when this is empty. |
 | `ENABLE_REQUEST_CHANNEL` | no | `true` opts into the request channel and Message Content. |
@@ -86,7 +86,7 @@ npm start
 
 The process registers its own slash commands when it logs in, and again when it joins the dev server. A kick and re-invite does not need `npm run register`. That script remains for a manual or CI run and uses the same registration path.
 
-Leave `GUILD_ID` unset for global commands. Global commands can take up to an hour to show up the first time. After that they stay with the application, so a re-invite already has them. Set `GUILD_ID` while developing to register on that server only. Those commands appear immediately, and joining that server again registers them right away.
+Leave `GUILD_ID` unset for global commands. Global commands can take up to an hour to show up the first time. After that they stay with the application, so a re-invite already has them. Set `GUILD_ID` while developing to register on that server only. Those commands appear immediately, and joining that server again registers them right away. `GUILD_ID` mode clears that application's global commands, so use a separate Discord application for local testing.
 
 Only one scope is kept. Guild mode clears this app's global commands. Global mode clears guild commands on servers the bot is in, including when it joins one. The manual script, run without a logged-in bot, updates the selected scope and clears global commands in guild mode. It does not walk every server.
 

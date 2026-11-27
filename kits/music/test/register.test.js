@@ -48,6 +48,16 @@ function puts(rest, route) {
   return rest.calls.filter((call) => call[0] === 'put' && call[1] === route)
 }
 
+function omitFalseRequired(command) {
+  const copy = structuredClone(command)
+  const walk = (option) => {
+    if (option.required === false) delete option.required
+    option.options?.forEach(walk)
+  }
+  copy.options?.forEach(walk)
+  return copy
+}
+
 describe('command registration', () => {
   test('startup registers when commands are missing and skips when they match', async () => {
     const previous = process.env.DISCORD_BOT_TOKEN
@@ -88,6 +98,39 @@ describe('command registration', () => {
       if (previous === undefined) delete process.env.DISCORD_BOT_TOKEN
       else process.env.DISCORD_BOT_TOKEN = previous
     }
+  })
+
+  test('a Discord payload that omits required:false is not registered again', async () => {
+    const rest = memoryRest()
+    const route = Routes.applicationCommands(clientId)
+    rest.seed(route, commandData().map(omitFalseRequired))
+    const result = await syncCommands({ rest, clientId, commands: commandData() })
+    assert.equal(result.updated, false)
+    assert.equal(puts(rest, route).length, 0)
+    assert.equal(commandData().some((command) => command.options?.some((option) => option.required === false)), true)
+  })
+
+  test('runtime registration uses the logged-in application id', async () => {
+    const rest = memoryRest()
+    const warnings = []
+    const log = {
+      log() {},
+      warn(line) { warnings.push(line) },
+      error(line) { throw new Error(line) },
+    }
+    const appId = '333333333333333333'
+    const client = fakeClient()
+    client.application = { id: appId }
+    attachCommandSync(client, {
+      rest,
+      env: { DISCORD_BOT_TOKEN: token, CLIENT_ID: clientId },
+      log,
+    })
+    const result = await client.handlers.ready[0](client)
+    assert.equal(result.updated, true)
+    assert.equal(puts(rest, Routes.applicationCommands(appId)).length, 1)
+    assert.equal(puts(rest, Routes.applicationCommands(clientId)).length, 0)
+    assert.match(warnings[0], new RegExp(`${clientId} does not match the logged-in application ${appId}`))
   })
 
   test('guildCreate in guild mode re-registers that server only', async () => {
