@@ -203,25 +203,52 @@ export async function assertResolvedPublicUrl(raw, lookup = defaultLookup) {
 }
 
 function isProtocolParseError(error) {
-  const code = String(error?.code ?? '')
-  const message = String(error?.message ?? '')
+  const code = String(error?.code ?? error?.cause?.code ?? '')
+  const message = String(error?.message ?? error?.cause?.message ?? '')
   return code.startsWith('HPE_') || /parse error|invalid header|icy/i.test(message)
 }
 
 function probeStream(url) {
   return new Promise((resolve, reject) => {
     const lib = url.protocol === 'https:' ? https : http
+    let settled = false
+    let gotHeaders = false
+    let releasing = false
+    const finish = (error, response) => {
+      if (settled) return
+      settled = true
+      if (error) reject(error)
+      else resolve(response)
+    }
+    const release = (res) => {
+      if (releasing) return
+      releasing = true
+      res?.on('error', () => {})
+      res?.destroy()
+      req.destroy()
+    }
     const req = lib.request(url, {
       method: 'GET',
       insecureHTTPParser: true,
       timeout: 10_000,
       headers: { 'User-Agent': 'cord-kits-music/0.1', 'Icy-MetaData': '0' },
     }, (res) => {
-      res.resume()
-      resolve({ status: res.statusCode ?? 200, headers: res.headers })
+      gotHeaders = true
+      const status = res.statusCode ?? 200
+      const headers = { ...res.headers }
+      release(res)
+      finish(null, { status, headers })
     })
-    req.on('error', reject)
-    req.on('timeout', () => req.destroy(new Error('audio check timed out')))
+    req.on('error', (error) => {
+      if (gotHeaders || settled) return
+      release()
+      finish(error)
+    })
+    req.on('timeout', () => {
+      if (settled) return
+      release()
+      finish(new Error('audio check timed out'))
+    })
     req.end()
   })
 }

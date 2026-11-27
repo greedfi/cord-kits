@@ -350,7 +350,7 @@ export function createMusic(configStore, deps = {}) {
     else if (track.kind === 'soundcloud') raw = await resolveSoundCloudStream(track.url)
     else raw = track.url
     return resolveSafeStreamUrl(raw, {
-      fetchImpl: deps.fetchImpl ?? fetch,
+      fetchImpl: deps.fetchImpl,
       lookup: deps.lookup,
     })
   }

@@ -1,4 +1,6 @@
+import dns from 'node:dns'
 import { EventEmitter } from 'node:events'
+import net from 'node:net'
 import { PassThrough } from 'node:stream'
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -142,11 +144,13 @@ function harness(config, extra = {}) {
       return child
     },
     lookup: extra.lookup ?? (async () => [{ address: '1.1.1.1', family: 4 }]),
-    fetchImpl: extra.fetchImpl ?? (async () => ({
-      status: 200,
-      headers: { get() { return null } },
-      body: { async cancel() {} },
-    })),
+    ...(extra.realProbe ? {} : {
+      fetchImpl: extra.fetchImpl ?? (async () => ({
+        status: 200,
+        headers: { get() { return null } },
+        body: { async cancel() {} },
+      })),
+    }),
     ...(extra.spawn ? { spawn: extra.spawn } : {}),
     resolveStream: extra.resolveStream ?? (async (item) => item.url),
     relatedTracks: extra.relatedTracks,
@@ -565,4 +569,153 @@ describe('player', () => {
     assert.ok(spawns.length <= 4)
     assert.equal(music.snapshot(guild).current, null)
   })
+
+  test('an endless ICY stream is accepted and the probe socket closes', async () => {
+    await withLocalDns(checkIcyProbe)
+  })
+
+  test('a real redirect to a private host is refused before ffmpeg', async () => {
+    await withLocalDns(checkPrivateRedirect)
+  })
 })
+
+let dnsTail = Promise.resolve()
+
+function withLocalDns(run) {
+  const next = dnsTail.then(run, run)
+  dnsTail = next.then(() => {}, () => {})
+  return next
+}
+
+async function checkIcyProbe() {
+  const probe = await openProbe()
+  const restore = pointLookup('icy.radio.test', '127.0.0.1')
+  try {
+    const url = `http://icy.radio.test:${probe.port}/stream`
+    const { music, spawns } = harness(playingConfig(), { realProbe: true })
+    const result = await music.play(guild, voiceChannel(guild, '444444444444444444'), [
+      track('Station', { kind: 'radio', url }),
+    ])
+    assert.equal(result.ok, true)
+    assert.equal(spawns[0].args.includes(url), true)
+    assert.equal(await probe.closedSoon(), true)
+    assert.ok(probe.bytesWritten() < 256 * 1024)
+  } finally {
+    restore()
+    await probe.close()
+  }
+}
+
+async function checkPrivateRedirect() {
+  const probe = await openProbe()
+  const restore = pointLookup('icy.radio.test', '127.0.0.1')
+  try {
+    const url = `http://icy.radio.test:${probe.port}/redirect`
+    const { music, spawns } = harness(playingConfig(), { realProbe: true })
+    await assert.rejects(
+      () => music.play(guild, voiceChannel(guild, '444444444444444444'), [
+        track('Hop', { url }),
+      ]),
+      (error) => error.code === 'blocked_host',
+    )
+    assert.equal(spawns.length, 0)
+    assert.equal(probe.sinkHits, 0)
+    assert.equal(await probe.closedSoon(), true)
+  } finally {
+    restore()
+    await probe.close()
+  }
+}
+
+function pointLookup(hostname, address) {
+  const original = dns.lookup
+  dns.lookup = (host, options, callback) => {
+    let opts = options
+    let done = callback
+    if (typeof options === 'function') {
+      done = options
+      opts = {}
+    }
+    if (host === hostname) {
+      if (opts?.all) done(null, [{ address, family: 4 }])
+      else done(null, address, 4)
+      return undefined
+    }
+    return original(host, opts, done)
+  }
+  return () => {
+    dns.lookup = original
+  }
+}
+
+function openProbe() {
+  const seen = []
+  let sinkHits = 0
+  let sinkPort = 0
+  const sink = net.createServer((socket) => {
+    sinkHits += 1
+    socket.destroy()
+  })
+  const server = net.createServer((socket) => {
+    const record = { socket, bytes: 0, closed: false, opened: Date.now() }
+    seen.push(record)
+    let request = ''
+    let pump = null
+    const stop = () => {
+      if (pump) clearInterval(pump)
+      pump = null
+    }
+    socket.on('data', (chunk) => {
+      request += chunk.toString('latin1')
+      if (!request.includes('\r\n\r\n') || record.answered) return
+      record.answered = true
+      if (request.includes('GET /redirect')) {
+        socket.end(
+          `HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:${sinkPort}/secret\r\nConnection: close\r\n\r\n`,
+        )
+        return
+      }
+      socket.write('ICY 200 OK\r\nicy-name: Station\r\n\r\n')
+      pump = setInterval(() => {
+        if (socket.destroyed) return
+        socket.write('x'.repeat(64 * 1024))
+      }, 10)
+    })
+    socket.on('close', () => {
+      stop()
+      record.closed = true
+      record.closedAt = Date.now()
+      record.bytes = socket.bytesWritten
+    })
+    socket.on('error', stop)
+  })
+  return new Promise((resolve, reject) => {
+    sink.once('error', reject)
+    sink.listen(0, '127.0.0.1', () => {
+      sinkPort = sink.address().port
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', () => {
+        resolve({
+          port: server.address().port,
+          get sinkHits() { return sinkHits },
+          bytesWritten() { return seen.reduce((sum, item) => sum + (item.bytes || item.socket.bytesWritten), 0) },
+          async closedSoon() {
+            const deadline = Date.now() + 500
+            while (seen.length === 0 || seen.some((item) => !item.closed)) {
+              if (Date.now() > deadline) return false
+              await new Promise((done) => setTimeout(done, 10))
+            }
+            return seen.every((item) => item.closedAt - item.opened < 500)
+          },
+          close() {
+            for (const item of seen) item.socket.destroy()
+            return Promise.all([
+              new Promise((done) => server.close(done)),
+              new Promise((done) => sink.close(done)),
+            ])
+          },
+        })
+      })
+    })
+  })
+}
