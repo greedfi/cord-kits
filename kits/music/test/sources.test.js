@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { SourceError, classifySource, isYouTubeUrl } from '../src/sources.js'
+import { SourceError, classifySource, interpretQuery, isYouTubeUrl } from '../src/sources.js'
 
 const youtubeUrls = [
   'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
@@ -119,5 +119,11 @@ describe('source resolution', () => {
   test('a file named youtube.mp3 on another host is direct audio', () => {
     const source = classifySource('https://cdn.example.com/youtube.mp3')
     assert.equal(source.kind, 'direct')
+  })
+
+  test('a bare name is a SoundCloud search and a catalog link is refused', () => {
+    assert.deepEqual(interpretQuery('blue monday'), { mode: 'search', query: 'blue monday' })
+    assert.throws(() => interpretQuery('https://open.spotify.com/playlist/abc'), (error) => error.code === 'unavailable_catalog')
+    assert.throws(() => interpretQuery('a name', { kind: 'radio' }), (error) => error.code === 'unsupported')
   })
 })

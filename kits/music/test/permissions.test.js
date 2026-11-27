@@ -2,7 +2,13 @@ import { readFileSync } from 'node:fs'
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { PermissionFlagsBits } from 'discord.js'
-import { BOT_PERMISSION_NAMES, BOT_PERMISSIONS, inviteUrl } from '../src/permissions.js'
+import {
+  BOT_PERMISSION_NAMES,
+  BOT_PERMISSIONS,
+  REQUEST_CHANNEL_PERMISSIONS,
+  VOICE_STATUS_PERMISSIONS,
+  inviteUrl,
+} from '../src/permissions.js'
 
 describe('music permissions', () => {
   test('invite bits match discord.js and exclude Administrator', () => {
@@ -28,5 +34,14 @@ describe('music permissions', () => {
     assert.ok(root.includes(url))
     assert.match(readme, /GuildVoiceStates/)
     assert.match(readme, /Guilds/)
+    assert.match(readme, /22\.12/)
+    assert.equal(REQUEST_CHANNEL_PERMISSIONS, 3222528n)
+    assert.equal(VOICE_STATUS_PERMISSIONS, 281474979859456n)
+    assert.match(readme, /3222528/)
+    assert.match(readme, /281474979859456/)
+    assert.match(readme, /ENABLE_REQUEST_CHANNEL/)
+    assert.match(readme, /Message Content/)
+    assert.match(root, /3222528/)
+    assert.match(root, /22\.12/)
   })
 })

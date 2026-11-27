@@ -31,9 +31,13 @@ describe('music packaging', () => {
     for (const pattern of banned) assert.equal(pattern.test(sources), false, String(pattern))
   })
 
-  test('docker and railway stay on Node 20 and restart', () => {
+  test('docker and railway use Node 22.12 and restart', () => {
     const docker = readFileSync(path.join(root, 'Dockerfile'), 'utf8')
-    assert.match(docker, /node:20-slim/)
+    const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'))
+    assert.match(docker, /node:22-slim/)
+    assert.match(docker, /22\.12\.0/)
+    assert.equal(pkg.engines.node, '>=22.12.0')
+    assert.match(readFileSync(path.join(root, '.npmrc'), 'utf8'), /engine-strict=true/)
     assert.match(docker, /ffmpeg/)
     assert.match(docker, /USER node/)
     const railway = JSON.parse(readFileSync(path.join(root, 'railway.json'), 'utf8'))

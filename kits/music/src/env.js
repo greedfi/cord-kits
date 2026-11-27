@@ -31,11 +31,24 @@ export function requireEnv(name) {
   return value
 }
 
+export function dataDir() {
+  return process.env.DATA_DIR
+    ? path.resolve(process.env.DATA_DIR)
+    : path.join(process.cwd(), 'data')
+}
+
+export function envFlag(name) {
+  const value = process.env[name]?.trim().toLowerCase()
+  return value === '1' || value === 'true' || value === 'yes'
+}
+
 export function redact(text) {
-  const token = process.env.DISCORD_BOT_TOKEN
-  const value = String(text)
-  if (!token) return value
-  return value.split(token).join('[redacted]')
+  let value = String(text)
+  for (const name of ['DISCORD_BOT_TOKEN', 'SOUNDCLOUD_CLIENT_ID']) {
+    const secret = process.env[name]?.trim()
+    if (secret) value = value.split(secret).join('[redacted]')
+  }
+  return value.replace(/client_id=[^&\s]+/gi, 'client_id=[redacted]')
 }
 
 export function isDirectRun(metaUrl) {

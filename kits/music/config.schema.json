@@ -15,8 +15,16 @@
     "maxQueueSize": {
       "type": "integer",
       "minimum": 1,
-      "maximum": 500,
-      "description": "Maximum number of tracks waiting per guild, not counting the track that is playing."
+      "maximum": 1000,
+      "description": "Maximum waiting tracks per guild. 1000 is the hard cap."
+    },
+    "autoplay": {
+      "type": "boolean",
+      "description": "Queue a related SoundCloud track when the queue ends."
+    },
+    "filter": {
+      "type": "string",
+      "enum": ["off", "bassboost", "nightcore", "8d"]
     },
     "guilds": {
       "type": "object",
@@ -27,16 +35,43 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "defaultVolume": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 100
+          "defaultVolume": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "maxQueueSize": { "type": "integer", "minimum": 1, "maximum": 1000 },
+          "autoplay": { "type": "boolean" },
+          "stayConnected": { "type": "boolean" },
+          "filter": { "type": "string", "enum": ["off", "bassboost", "nightcore", "8d"] },
+          "djRoleId": { "type": "string", "pattern": "^[0-9]{17,20}$" },
+          "djOnly": {
+            "type": "array",
+            "maxItems": 26,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "play", "playskip", "playtop", "pause", "resume", "skip", "back", "replay",
+                "stop", "loop", "shuffle", "move", "remove", "clear", "seek", "forward",
+                "rewind", "volume", "join", "leave", "search", "filter", "playlist",
+                "queue", "nowplaying", "sleep"
+              ]
+            }
           },
-          "maxQueueSize": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 500
-          }
+          "textLock": { "type": "boolean" },
+          "textChannels": {
+            "type": "array",
+            "maxItems": 25,
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^[0-9]{17,20}$" }
+          },
+          "voiceLock": { "type": "boolean" },
+          "voiceChannels": {
+            "type": "array",
+            "maxItems": 25,
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^[0-9]{17,20}$" }
+          },
+          "requestChannelId": { "type": "string", "pattern": "^[0-9]{17,20}$" },
+          "requestAutoDelete": { "type": "boolean" },
+          "requestCommandsOnly": { "type": "boolean" }
         }
       }
     }
