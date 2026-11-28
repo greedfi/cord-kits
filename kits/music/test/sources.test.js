@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { SourceError, classifySource, isYouTubeUrl } from '../src/sources.js'
+import { SourceError, classifySource, identifyStream, isYouTubeUrl, resolveSafeStreamUrl } from '../src/sources.js'
 
 const youtubeUrls = [
   'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
@@ -54,7 +54,7 @@ describe('source resolution', () => {
     assert.equal(classifySource('https://radio.example.com/live.m3u8').kind, 'radio')
     assert.equal(classifySource('https://radio.example.com/stream.pls').kind, 'radio')
     assert.equal(classifySource('https://ice.example.com/station/stream').kind, 'radio')
-    assert.equal(classifySource('https://example.com:8000/listen', { kind: 'radio' }).kind, 'radio')
+    assert.equal(classifySource('https://example.com:8000/listen').kind, 'radio')
 
     const attachment = classifySource(null, {
       attachment: {
@@ -78,8 +78,15 @@ describe('source resolution', () => {
     assert.equal(typed.kind, 'attachment')
   })
 
-  test('rejects unsupported pages, non-audio files, private hosts, and empty input', () => {
-    assert.throws(() => classifySource('https://example.com/page'), (error) => error.code === 'unsupported')
+  test('rejects unsupported pages, non-audio files, private hosts, and empty input', async () => {
+    assert.equal(classifySource('https://example.com/page').kind, 'probe')
+    await assert.rejects(
+      () => identifyStream('https://example.com/page', {
+        lookup: async () => [{ address: '1.1.1.1', family: 4 }],
+        requestImpl: async () => ({ status: 200, headers: { 'content-type': 'text/html' } }),
+      }),
+      (error) => error.code === 'unsupported',
+    )
     assert.throws(() => classifySource(null, {
       attachment: {
         url: 'https://cdn.discordapp.com/attachments/1/2/photo.png',
@@ -110,9 +117,81 @@ describe('source resolution', () => {
       assert.throws(() => classifySource(url), SourceError, url)
     }
     assert.throws(() => classifySource('   '), (error) => error.code === 'empty')
-    assert.throws(
-      () => classifySource('https://example.com/song.mp3', { kind: 'soundcloud' }),
-      (error) => error.code === 'unsupported',
+  })
+
+  test('a name is a SoundCloud search and Spotify or Apple links are refused', () => {
+    const search = classifySource('a calm song')
+    assert.equal(search.kind, 'search')
+    assert.equal(search.query, 'a calm song')
+    assert.equal(classifySource('abba:dancing queen').kind, 'search')
+    assert.throws(() => classifySource('open.spotify.com/track/abc'), (error) => error.code === 'not_a_source')
+    assert.throws(() => classifySource('music.apple.com/us/album/example'), (error) => error.code === 'not_a_source')
+    for (const url of [
+      'https://rr3---sn.googlevideo.com/videoplayback?id=1',
+      'https://i.ytimg.com/vi/abc/0.jpg',
+      'https://p.scdn.co/mp3-preview/x',
+      'https://audio.spotifycdn.com/file',
+      'https://open.spotify.link/abc',
+    ]) {
+      assert.throws(() => classifySource(url), SourceError, url)
+    }
+    assert.equal(classifySource('100% pure').kind, 'search')
+    const encoded = classifySource('https://cdn.example.com/100%25.mp3')
+    assert.equal(encoded.kind, 'direct')
+    assert.equal(classifySource('https://cdn.example.com/100%.mp3').kind, 'direct')
+    for (const url of [
+      'https://open.spotify.com/track/abc',
+      'https://music.apple.com/us/album/example/1',
+      'spotify:track:abc',
+    ]) {
+      assert.throws(() => classifySource(url), (error) => error.code === 'not_a_source', url)
+    }
+  })
+
+  test('a bare URL is a radio stream from ICY or audio headers, and a sized file is direct', async () => {
+    const lookup = async () => [{ address: '1.1.1.1', family: 4 }]
+    const url = 'https://radio.example.com/'
+    const icy = Object.assign(new Error('Parse Error: Expected HTTP/'), { code: 'HPE_INVALID_CONSTANT' })
+    const radio = await identifyStream(url, {
+      lookup,
+      requestImpl: async () => { throw icy },
+    })
+    assert.equal(radio.kind, 'radio')
+    assert.equal(radio.url, url)
+    const typed = await identifyStream(url, {
+      lookup,
+      requestImpl: async () => ({ status: 200, headers: { 'content-type': 'audio/mpeg', 'icy-name': 'Station' } }),
+    })
+    assert.equal(typed.kind, 'radio')
+    const file = await identifyStream('https://cdn.example.com/blob', {
+      lookup,
+      requestImpl: async () => ({
+        status: 200,
+        headers: { 'content-type': 'audio/mpeg', 'content-length': '2048' },
+      }),
+    })
+    assert.equal(file.kind, 'direct')
+    assert.equal(file.title, 'blob')
+  })
+
+  test('an ICY response is kept after the host is already public', async () => {
+    const lookup = async () => [{ address: '1.1.1.1', family: 4 }]
+    const url = 'https://radio.example.com/stream'
+    const icy = Object.assign(new Error('Parse Error: Invalid constant'), { code: 'HPE_INVALID_CONSTANT' })
+    assert.equal(await resolveSafeStreamUrl(url, {
+      lookup,
+      requestImpl: async () => { throw icy },
+    }), url)
+    assert.equal(await resolveSafeStreamUrl(url, {
+      lookup,
+      requestImpl: async () => ({ statusCode: 200, headers: { 'icy-name': 'Station' } }),
+    }), url)
+    await assert.rejects(
+      () => resolveSafeStreamUrl(url, {
+        lookup,
+        requestImpl: async () => ({ statusCode: 302, headers: { location: 'https://p.scdn.co/redirect' } }),
+      }),
+      (error) => error.code === 'not_a_source',
     )
   })
 

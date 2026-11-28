@@ -1,15 +1,21 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  createGuildQueues,
+  back,
   createQueueState,
   enqueue,
   enqueueMany,
+  finishCurrent,
+  insertFront,
   formatQueue,
+  moveTrack,
+  parseClock,
   promote,
+  removeAt,
   safeLabel,
+  seekTo,
   setVolume,
-  skip,
+  shuffleTracks,
   stop,
 } from '../src/queue.js'
 
@@ -28,11 +34,11 @@ describe('queue', () => {
     assert.deepEqual(started.state.tracks.map((item) => item.title), ['B'])
     assert.equal(second.state.tracks.length, 2)
 
-    const skipped = skip(started.state)
+    const skipped = finishCurrent(started.state, { natural: false })
     assert.equal(skipped.track.title, 'B')
     assert.equal(skipped.state.tracks.length, 0)
 
-    const ended = skip(skipped.state)
+    const ended = finishCurrent(skipped.state, { natural: false })
     assert.equal(ended.track, null)
     assert.equal(ended.state.current, null)
 
@@ -71,14 +77,6 @@ describe('queue', () => {
     }
   })
 
-  test('guild queues do not share tracks', () => {
-    const queues = createGuildQueues(30)
-    queues.set('111111111111111111', enqueue(queues.get('111111111111111111'), track('a'), 5).state)
-    assert.equal(queues.get('222222222222222222').tracks.length, 0)
-    assert.equal(queues.get('222222222222222222').volume, 30)
-    assert.equal(queues.get('111111111111111111').tracks.length, 1)
-  })
-
   test('formatQueue lists the current track and caps the waiting list', () => {
     const state = {
       current: { title: 'Now *playing*', url: 'https://example.com/now.mp3' },
@@ -95,5 +93,80 @@ describe('queue', () => {
     assert.match(text, /10\. Track 10 — alice/)
     assert.match(text, /…and 2 more/)
     assert.equal(safeLabel('***hello***').includes('*'), false)
+    assert.equal(safeLabel('<@123> @everyone'), 'Untitled')
+  })
+
+  test('loop, skip, back, move, remove, seek, and shuffle cover the edges', () => {
+    const song = { ...createQueueState(), current: track('https://example.com/a.mp3', 'A'), loop: 'song' }
+    const replayed = finishCurrent(song, { natural: true })
+    assert.equal(replayed.track.title, 'A')
+    assert.equal(replayed.state.current.title, 'A')
+    const skipped = finishCurrent(song, { natural: false })
+    assert.equal(skipped.track, null)
+    assert.equal(skipped.state.history[0].title, 'A')
+
+    const queued = {
+      ...createQueueState(),
+      current: track('https://example.com/a.mp3', 'A'),
+      tracks: [track('https://example.com/b.mp3', 'B')],
+      loop: 'queue',
+    }
+    const rotated = finishCurrent(queued, { natural: true })
+    assert.equal(rotated.track.title, 'B')
+    assert.equal(rotated.state.tracks[0].title, 'A')
+    const skippedQueue = finishCurrent(queued, { natural: false })
+    assert.equal(skippedQueue.track.title, 'B')
+    assert.equal(skippedQueue.state.tracks.length, 0)
+
+    const history = finishCurrent(queued, { natural: false }).state
+    const returned = back(history)
+    assert.equal(returned.ok, true)
+    assert.equal(returned.track.title, 'A')
+    assert.equal(returned.state.tracks[0].title, 'B')
+    const empty = back(createQueueState())
+    assert.equal(empty.ok, false)
+    assert.equal(empty.state.history.length, 0)
+    const full = {
+      ...createQueueState(),
+      current: track('now', 'Now'),
+      tracks: [track('a', 'A')],
+      history: [track('old', 'Old')],
+    }
+    const blocked = back(full, 1)
+    assert.equal(blocked.ok, false)
+    assert.equal(blocked.error, 'queue_full')
+    assert.equal(blocked.state.tracks.length, 1)
+    assert.equal(back(full, 2).ok, true)
+
+    const waiting = [track('a', 'A'), track('b', 'B'), track('c', 'C')]
+    assert.deepEqual(moveTrack(waiting, 1, 1).tracks.map((item) => item.title), ['A', 'B', 'C'])
+    assert.deepEqual(moveTrack(waiting, 1, 3).tracks.map((item) => item.title), ['B', 'C', 'A'])
+    assert.equal(moveTrack(waiting, 0, 1).ok, false)
+    assert.equal(moveTrack(waiting, 4, 1).ok, false)
+    assert.equal(waiting.map((item) => item.title).join(''), 'ABC')
+    assert.equal(removeAt(waiting, 2).removed.title, 'B')
+    assert.equal(removeAt(waiting, 9).ok, false)
+
+    const playing = {
+      ...createQueueState(),
+      current: { ...track('https://example.com/a.mp3', 'A'), kind: 'direct', durationMs: 90_000 },
+    }
+    assert.equal(seekTo(playing, 90_000).error, 'past_end')
+    assert.equal(seekTo(playing, -1).error, 'bad_position')
+    assert.equal(seekTo({ ...playing, current: { ...playing.current, kind: 'radio', durationMs: null } }, 1000).error, 'unseekable')
+    assert.equal(seekTo(playing, 0).ok, true)
+    assert.equal(seekTo(createQueueState(), 0).error, 'idle')
+
+    assert.deepEqual(shuffleTracks(waiting, () => 0).map((item) => item.title), ['B', 'C', 'A'])
+    assert.equal(parseClock('1:30'), 90_000)
+    assert.equal(parseClock('1:02:03'), 3_723_000)
+    assert.equal(parseClock('90'), 90_000)
+    assert.equal(parseClock('1:99'), null)
+    assert.equal(parseClock('-1'), null)
+
+    const topped = insertFront({ ...createQueueState(), tracks: [track('c', 'C')] }, [track('a', 'A'), track('b', 'B')], 2)
+    assert.deepEqual(topped.accepted.map((item) => item.title), ['A'])
+    assert.equal(topped.rejected, 1)
+    assert.deepEqual(topped.state.tracks.map((item) => item.title), ['A', 'C'])
   })
 })

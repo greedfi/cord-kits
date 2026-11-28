@@ -14,7 +14,7 @@ import { silentLogger, tempDir, waitFor } from './helpers.js'
 const schemaPath = fileURLToPath(new URL('../config.schema.json', import.meta.url))
 const example = JSON.parse(readFileSync(new URL('../config.example.json', import.meta.url), 'utf8'))
 
-function storeFrom(text, { watch = false, logger = silentLogger } = {}) {
+function storeFrom(text, { watch = false, logger = silentLogger, pollIntervalMs = 20 } = {}) {
   const dir = tempDir()
   const filePath = dir.path('config.json')
   writeFileSync(filePath, text)
@@ -24,6 +24,7 @@ function storeFrom(text, { watch = false, logger = silentLogger } = {}) {
     logger,
     watch,
     debounceMs: 30,
+    pollIntervalMs,
   })
   return { dir, filePath, store }
 }
@@ -107,6 +108,24 @@ describe('music config', () => {
     }
   })
 
+  test('a guild update can clear a role and a bad update keeps the last good file', () => {
+    const { dir, store } = storeFrom(JSON.stringify(example))
+    try {
+      store.update((draft) => {
+        draft.guilds['111111111111111111'].djRoleId = null
+      })
+      assert.equal(store.get().guilds['111111111111111111'].djRoleId, null)
+      assert.throws(() => store.update((draft) => {
+        draft.defaultVolume = 500
+      }), ConfigError)
+      assert.equal(store.get().defaultVolume, 50)
+      assert.equal(store.get().guilds['111111111111111111'].djRoleId, null)
+    } finally {
+      store.close()
+      dir.remove()
+    }
+  })
+
   test('fs.watch reloads a good file and ignores a bad write', async () => {
     const errors = []
     const { dir, filePath, store } = storeFrom(`${JSON.stringify(example)}\n`, {
@@ -121,9 +140,9 @@ describe('music config', () => {
     try {
       const next = { ...example, defaultVolume: 22 }
       writeFileSync(filePath, `${JSON.stringify(next)}\n`)
-      await waitFor(() => store.get().defaultVolume === 22)
+      await waitFor(() => store.get().defaultVolume === 22, 8_000)
       writeFileSync(filePath, '{')
-      await waitFor(() => errors.some((message) => message.includes('Keeping last good config')))
+      await waitFor(() => errors.some((message) => message.includes('Keeping last good config')), 8_000)
       assert.equal(store.get().defaultVolume, 22)
     } finally {
       store.close()

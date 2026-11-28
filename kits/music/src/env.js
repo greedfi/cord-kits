@@ -32,10 +32,23 @@ export function requireEnv(name) {
 }
 
 export function redact(text) {
-  const token = process.env.DISCORD_BOT_TOKEN
-  const value = String(text)
-  if (!token) return value
-  return value.split(token).join('[redacted]')
+  let value = String(text)
+  for (const name of ['DISCORD_BOT_TOKEN', 'SOUNDCLOUD_CLIENT_ID']) {
+    const secret = process.env[name]?.trim()
+    if (secret) value = value.split(secret).join('[redacted]')
+  }
+  return value.replace(/([?&]client_id=)[^&\s]+/gi, '$1[redacted]')
+}
+
+export function requestChannelEnabled(env = process.env) {
+  const raw = env.ENABLE_REQUEST_CHANNEL?.trim().toLowerCase()
+  return raw === '1' || raw === 'true' || raw === 'yes'
+}
+
+export function dataDir() {
+  return process.env.DATA_DIR
+    ? path.resolve(process.env.DATA_DIR)
+    : path.join(process.cwd(), 'data')
 }
 
 export function isDirectRun(metaUrl) {

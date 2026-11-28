@@ -77,6 +77,7 @@ export function createConfigStore({
   fsImpl = fs,
   watch = true,
   debounceMs = 50,
+  pollIntervalMs = 250,
 }) {
   const validate = createValidator(schema)
   const emitter = new EventEmitter()
@@ -84,6 +85,7 @@ export function createConfigStore({
   let timer = null
   let closed = false
   let watcher = { close() {} }
+  let pollTimer = null
 
   function commit(config) {
     const same = current != null && JSON.stringify(current) === JSON.stringify(config)
@@ -143,6 +145,24 @@ export function createConfigStore({
       if (name != null && name !== base) return
       schedule()
     })
+    let seenStamp = fileStamp()
+    pollTimer = setInterval(() => {
+      if (closed) return
+      const stamp = fileStamp()
+      if (stamp === seenStamp) return
+      seenStamp = stamp
+      schedule()
+    }, pollIntervalMs)
+    pollTimer.unref?.()
+  }
+
+  function fileStamp() {
+    try {
+      const stat = fsImpl.statSync(filePath)
+      return `${stat.mtimeMs}:${stat.size}`
+    } catch {
+      return null
+    }
   }
 
   return {
@@ -167,6 +187,7 @@ export function createConfigStore({
     close() {
       closed = true
       clearTimeout(timer)
+      clearInterval(pollTimer)
       watcher.close()
     },
   }

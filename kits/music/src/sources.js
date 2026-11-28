@@ -1,3 +1,6 @@
+import { promises as dns } from 'node:dns'
+import http from 'node:http'
+import https from 'node:https'
 import { isIP } from 'node:net'
 
 export class SourceError extends Error {
@@ -18,8 +21,16 @@ const YOUTUBE_HOSTS = new Set([
   'youtube-nocookie.com',
   'music.youtube.com',
   'youtubeeducation.com',
+  'googlevideo.com',
+  'ytimg.com',
 ])
-const KINDS = new Set(['auto', 'soundcloud', 'direct', 'radio'])
+const PLAYLIST_TYPES = new Set([
+  'audio/x-mpegurl',
+  'application/vnd.apple.mpegurl',
+  'application/x-mpegurl',
+  'audio/x-scpls',
+  'application/pls+xml',
+])
 
 function bareHost(hostname) {
   return hostname.replace(/^\[|\]$/g, '').toLowerCase()
@@ -89,12 +100,28 @@ function isYouTubeHost(hostname) {
   if (host.endsWith('.youtube.com')) return true
   if (host.endsWith('.youtube-nocookie.com')) return true
   if (host.endsWith('.youtu.be')) return true
+  if (host.endsWith('.googlevideo.com')) return true
+  if (host.endsWith('.ytimg.com')) return true
   return false
 }
 
 function isSoundCloudHost(hostname) {
   const host = bareHost(hostname)
   return host === 'soundcloud.com' || host.endsWith('.soundcloud.com')
+}
+
+const BLOCKED_SERVICES = [
+  'spotify.com',
+  'music.apple.com',
+  'itunes.apple.com',
+  'scdn.co',
+  'spotifycdn.com',
+  'spotify.link',
+]
+
+function isBlockedService(hostname) {
+  const host = bareHost(hostname)
+  return BLOCKED_SERVICES.some((name) => host === name || host.endsWith(`.${name}`))
 }
 
 function extensionOf(pathname) {
@@ -111,10 +138,22 @@ function looksLikeRadio(url, ext) {
     || path.includes('shoutcast')
 }
 
+function safeDecode(value) {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
 function titleFromUrl(url) {
-  const base = decodeURIComponent(url.pathname.split('/').filter(Boolean).pop() ?? '')
+  const base = safeDecode(url.pathname.split('/').filter(Boolean).pop() ?? '')
   const stripped = base.replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ').trim()
   return stripped || url.hostname
+}
+
+function looksLikeUrl(value) {
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(value) || /^spotify:/i.test(value)
 }
 
 export function assertPublicHttpUrl(raw) {
@@ -133,13 +172,188 @@ export function assertPublicHttpUrl(raw) {
   if (isYouTubeHost(url.hostname)) {
     throw new SourceError('youtube', 'YouTube is not supported.')
   }
+  if (isBlockedService(url.hostname)) {
+    throw new SourceError(
+      'not_a_source',
+      'Spotify and Apple Music are not playback sources, and this bot does not import their playlists.',
+    )
+  }
   if (isBlockedHost(url.hostname)) {
     throw new SourceError('blocked_host', 'That host is not allowed.')
   }
   return url
 }
 
-function classifyAttachment(attachment, kind) {
+async function defaultLookup(hostname, options) {
+  return dns.lookup(hostname, options)
+}
+
+export async function assertResolvedPublicUrl(raw, lookup = defaultLookup) {
+  const url = assertPublicHttpUrl(raw)
+  if (isIP(bareHost(url.hostname))) return url
+  let records
+  try {
+    records = await lookup(url.hostname, { all: true, verbatim: true })
+  } catch {
+    throw new SourceError('blocked_host', 'That host is not allowed.')
+  }
+  const list = Array.isArray(records) ? records : [records]
+  if (list.length === 0) throw new SourceError('blocked_host', 'That host is not allowed.')
+  for (const record of list) {
+    const address = typeof record === 'string' ? record : record?.address
+    if (!address || isBlockedHost(address)) {
+      throw new SourceError('blocked_host', 'That host is not allowed.')
+    }
+  }
+  return url
+}
+
+function isProtocolParseError(error) {
+  const code = String(error?.code ?? error?.cause?.code ?? '')
+  const message = String(error?.message ?? error?.cause?.message ?? '')
+  return code.startsWith('HPE_') || /parse error|invalid header|icy/i.test(message)
+}
+
+function probeStream(url) {
+  return new Promise((resolve, reject) => {
+    const lib = url.protocol === 'https:' ? https : http
+    let settled = false
+    let gotHeaders = false
+    let releasing = false
+    const finish = (error, response) => {
+      if (settled) return
+      settled = true
+      if (error) reject(error)
+      else resolve(response)
+    }
+    const release = (res) => {
+      if (releasing) return
+      releasing = true
+      res?.on('error', () => {})
+      res?.destroy()
+      req.destroy()
+    }
+    const req = lib.request(url, {
+      method: 'GET',
+      insecureHTTPParser: true,
+      timeout: 10_000,
+      headers: { 'User-Agent': 'cord-kits-music/0.1', 'Icy-MetaData': '0' },
+    }, (res) => {
+      gotHeaders = true
+      const status = res.statusCode ?? 200
+      const headers = { ...res.headers }
+      release(res)
+      finish(null, { status, headers })
+    })
+    req.on('error', (error) => {
+      if (gotHeaders || settled) return
+      release()
+      finish(error)
+    })
+    req.on('timeout', () => {
+      if (settled) return
+      release()
+      finish(new Error('audio check timed out'))
+    })
+    req.end()
+  })
+}
+
+function headerValue(headers, name) {
+  if (!headers) return null
+  if (typeof headers.get === 'function') return headers.get(name)
+  const value = headers[name] ?? headers[name.toLowerCase()]
+  return Array.isArray(value) ? value[0] : value ?? null
+}
+
+async function requestOnce(url, options) {
+  if (options.requestImpl) return options.requestImpl(url.toString())
+  if (options.fetchImpl) {
+    return options.fetchImpl(url.toString(), {
+      method: 'GET',
+      redirect: 'manual',
+      signal: AbortSignal.timeout(10_000),
+    })
+  }
+  return probeStream(url)
+}
+
+async function readStream(raw, options = {}) {
+  const lookup = options.lookup ?? defaultLookup
+  let current = String(raw)
+  for (let hop = 0; hop < 5; hop += 1) {
+    const url = await assertResolvedPublicUrl(current, lookup)
+    let response
+    try {
+      response = await requestOnce(url, options)
+    } catch (error) {
+      if (isProtocolParseError(error)) return { url: url.toString(), icy: true, headers: {} }
+      if (error instanceof SourceError) throw error
+      throw new SourceError('invalid_url', 'Could not check that audio URL.')
+    }
+    const status = response.status ?? response.statusCode ?? 200
+    if (status >= 300 && status < 400) {
+      const location = headerValue(response.headers, 'location')
+      if (!location) throw new SourceError('invalid_url', 'Redirect was empty.')
+      current = new URL(location, url).toString()
+      continue
+    }
+    if (typeof response.body?.cancel === 'function') {
+      try {
+        await response.body.cancel()
+      } catch {
+        /* the check only needed the headers */
+      }
+    }
+    return { url: url.toString(), icy: false, headers: response.headers ?? {} }
+  }
+  throw new SourceError('invalid_url', 'Too many redirects.')
+}
+
+export async function resolveSafeStreamUrl(raw, options = {}) {
+  const result = await readStream(raw, options)
+  return result.url
+}
+
+function contentType(headers) {
+  return String(headerValue(headers, 'content-type') ?? '').toLowerCase().split(';')[0].trim()
+}
+
+function hasIcyHeader(headers) {
+  return ['icy-name', 'icy-metaint', 'icy-description', 'ice-audio-info']
+    .some((name) => headerValue(headers, name))
+}
+
+function kindFromHeaders(headers) {
+  if (hasIcyHeader(headers)) return 'radio'
+  const type = contentType(headers)
+  if (PLAYLIST_TYPES.has(type)) return 'radio'
+  if (type.startsWith('audio/') || type === 'application/ogg') {
+    const length = Number(headerValue(headers, 'content-length'))
+    if (Number.isFinite(length) && length > 0) return 'direct'
+    return 'radio'
+  }
+  return null
+}
+
+export async function identifyStream(raw, options = {}) {
+  const result = await readStream(raw, options)
+  const url = new URL(result.url)
+  const kind = result.icy ? 'radio' : kindFromHeaders(result.headers)
+  if (!kind) {
+    throw new SourceError(
+      'unsupported',
+      'Unsupported source. Use SoundCloud, a direct audio file, a radio stream, or an attachment.',
+    )
+  }
+  return {
+    kind,
+    url: result.url,
+    title: kind === 'direct' ? titleFromUrl(url) : url.hostname,
+  }
+}
+
+function classifyAttachment(attachment) {
   if (!attachment?.url) throw new SourceError('empty', 'Provide a URL or an audio attachment.')
   const url = assertPublicHttpUrl(attachment.url)
   const name = attachment.name ?? ''
@@ -149,36 +363,49 @@ function classifyAttachment(attachment, kind) {
   if (attachment.size > 25 * 1024 * 1024) {
     throw new SourceError('unsupported', 'Attachment is larger than 25 MB.')
   }
-  if (kind === 'radio') {
-    return { kind: 'radio', url: url.toString(), title: name || url.hostname }
-  }
   if (!audio) throw new SourceError('unsupported', 'Attachment is not an audio file.')
   const title = name.replace(/\.[a-z0-9]+$/i, '') || 'Attachment'
   return { kind: 'attachment', url: url.toString(), title }
 }
 
 export function classifySource(input, options = {}) {
-  const kind = options.kind ?? 'auto'
-  if (!KINDS.has(kind)) throw new SourceError('unsupported', 'Unknown source kind.')
-  if (options.attachment) return classifyAttachment(options.attachment, kind)
+  if (options.attachment) return classifyAttachment(options.attachment)
   if (typeof input !== 'string' || input.trim() === '') {
-    throw new SourceError('empty', 'Provide a URL or an audio attachment.')
+    throw new SourceError('empty', 'Provide a song name, a URL, or an audio attachment.')
   }
-  const url = assertPublicHttpUrl(input.trim())
+  const trimmed = input.trim()
+  if (!looksLikeUrl(trimmed)) {
+    const host = trimmed.split(/[/?#]/)[0]
+    if (host && !host.includes(' ') && !host.includes(':')) {
+      if (isYouTubeHost(host)) throw new SourceError('youtube', 'YouTube is not supported.')
+      if (isBlockedService(host)) {
+        throw new SourceError(
+          'not_a_source',
+          'Spotify and Apple Music are not playback sources, and this bot does not import their playlists.',
+        )
+      }
+    }
+    return { kind: 'search', query: trimmed.slice(0, 200) }
+  }
+  let parsed = null
+  try {
+    parsed = new URL(trimmed)
+  } catch {
+    parsed = null
+  }
+  if (/^spotify:/i.test(trimmed)) {
+    throw new SourceError(
+      'not_a_source',
+      'Spotify and Apple Music are not playback sources, and this bot does not import their playlists.',
+    )
+  }
+  if (!parsed || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) {
+    if (parsed) throw new SourceError('invalid_url', 'Only http and https URLs are supported.')
+    return { kind: 'search', query: trimmed.slice(0, 200) }
+  }
+  const url = assertPublicHttpUrl(trimmed)
   const ext = extensionOf(url.pathname)
 
-  if (kind === 'soundcloud') {
-    if (!isSoundCloudHost(url.hostname)) {
-      throw new SourceError('unsupported', 'That URL is not a SoundCloud link.')
-    }
-    return { kind: 'soundcloud', url: url.toString(), title: null }
-  }
-  if (kind === 'direct') {
-    return { kind: 'direct', url: url.toString(), title: titleFromUrl(url) }
-  }
-  if (kind === 'radio') {
-    return { kind: 'radio', url: url.toString(), title: url.hostname }
-  }
   if (isSoundCloudHost(url.hostname)) {
     return { kind: 'soundcloud', url: url.toString(), title: null }
   }
@@ -188,8 +415,5 @@ export function classifySource(input, options = {}) {
   if (AUDIO_EXTENSIONS.has(ext)) {
     return { kind: 'direct', url: url.toString(), title: titleFromUrl(url) }
   }
-  throw new SourceError(
-    'unsupported',
-    'Unsupported source. Use SoundCloud, a direct audio file, a radio stream, or an attachment.',
-  )
+  return { kind: 'probe', url: url.toString(), title: url.hostname }
 }
