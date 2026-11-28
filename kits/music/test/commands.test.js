@@ -1,6 +1,7 @@
+import { readFileSync } from 'node:fs'
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { PermissionFlagsBits } from 'discord.js'
+import { ChannelType, PermissionFlagsBits } from 'discord.js'
 import { CONFIG_COMMANDS, CONTROL_COMMANDS, OPEN_COMMANDS } from '../src/catalog.js'
 import { commandData } from '../src/commands.js'
 
@@ -51,5 +52,12 @@ describe('music commands', () => {
       ['create', 'add', 'addtrack', 'addqueue', 'show', 'play', 'remove', 'delete', 'share', 'import'],
     )
     assert.equal(commands.find((command) => command.name === 'queue').default_member_permissions, undefined)
+    const schema = JSON.parse(readFileSync(new URL('../config.schema.json', import.meta.url), 'utf8'))
+    assert.deepEqual(schema.$defs.guild.properties.djOnly.items.enum, [...CONTROL_COMMANDS])
+    const textTypes = [ChannelType.GuildText, ChannelType.GuildAnnouncement]
+    for (const name of ['setup', 'texttoggle']) {
+      const option = commands.find((command) => command.name === name).options.find((entry) => entry.name === 'channel')
+      assert.deepEqual(option.channel_types, textTypes, name)
+    }
   })
 })

@@ -35,7 +35,7 @@
           "uniqueItems": true,
           "items": {
             "enum": [
-              "play", "playskip", "playtop", "search", "pause", "resume", "skip", "back",
+              "play", "playfile", "playskip", "playtop", "search", "pause", "resume", "skip", "back",
               "replay", "stop", "loop", "shuffle", "move", "remove", "clear", "seek",
               "forward", "rewind", "volume", "join", "leave", "sleep", "filter", "playlist"
             ]

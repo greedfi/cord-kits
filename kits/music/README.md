@@ -120,7 +120,7 @@ Only one scope is kept. Guild mode clears this app's global commands. Global mod
 
 The player message has Pause/Resume, Skip, Back, Loop, Shuffle, and Stop. The same DJ, text, and voice checks apply to those buttons. The progress line updates every 12 seconds, measured from the start of the edit so a slow edit does not stretch the gap. A control waits at least 4 seconds between edits. Idle panels are not edited. A deleted panel is forgotten.
 
-`/setup` keeps one player message in the request channel. Members type a name or a URL there. Auto-delete removes those messages when the bot has Manage Messages. "Commands only" limits music commands to that channel. Settings commands still work elsewhere so the limit can be changed. The request channel stays usable even if a text allow-list is set.
+`/setup` keeps one player message in a text channel or an announcement channel. Members type a name or a URL there. The bot sends and edits that message, and auto-delete removes request messages when it has Manage Messages. It does not publish or crosspost them. Threads, forums, and voice chats cannot be the request channel. "Commands only" limits music commands to that channel. Settings commands still work elsewhere so the limit can be changed. The request channel stays usable even if a text allow-list is set. `/texttoggle` accepts the same text and announcement channels.
 
 Join a normal voice channel before playing. The bot needs View Channel, Connect, and Speak there, including on a category overwrite. Stage channels are not supported. The bot joins, deafens itself, and refuses YouTube, Spotify, Apple Music, non-http(s) URLs, and private or loopback hosts. The private-host check is best effort: ffmpeg resolves DNS again and can follow a later redirect.
 

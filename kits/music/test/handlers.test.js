@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { MessageFlags, PermissionFlagsBits } from 'discord.js'
+import { ChannelType, MessageFlags, PermissionFlagsBits } from 'discord.js'
 import { createApp } from '../src/handlers.js'
 import { gatewayIntents } from '../src/permissions.js'
 import { attachClient } from '../src/runtime.js'
@@ -177,7 +177,7 @@ describe('interaction routing', () => {
       member: { voice: { channel: { id: '444444444444444444', type: 2 } }, permissions: { has: () => false }, roles: { cache: { has: () => false } } },
       content: 'secret-song-name',
       guild: { members: { me: {} } },
-      channel: { send: async () => {}, permissionsFor: () => ({ has: () => false }) },
+      channel: { id: '222222222222222222', type: ChannelType.GuildText, send: async () => {}, permissionsFor: () => ({ has: () => false }) },
       delete: async () => { throw new Error('deleted while disabled') },
     }
     await off.app.handleMessage(ignored)
@@ -190,6 +190,7 @@ describe('interaction routing', () => {
       delete: async () => { deleted = true },
       channel: {
         id: '222222222222222222',
+        type: ChannelType.GuildText,
         send: async (body) => body,
         permissionsFor: () => ({ has: () => true }),
       },
@@ -304,5 +305,124 @@ describe('interaction routing', () => {
     assert.equal(music.calls.length, 0)
     assert.equal(command.replies[0].payload.flags, MessageFlags.Ephemeral)
     assert.match(command.replies[0].payload.content, /I need View Channel in <#444444444444444444>/)
+  })
+
+  test('an announcement channel can take requests, the player panel, and a text limit', async () => {
+    const music = stubMusic()
+    const shown = []
+    const { app, config } = appFor({
+      music,
+      requestChannel: true,
+      panels: {
+        async show(_guildId, channel, body) {
+          shown.push({ channel, body })
+          return { channelId: channel.id, messageId: 'panel' }
+        },
+        async save() {},
+        get() { return null },
+        ids() { return [] },
+      },
+    })
+    const channelId = '777777777777777777'
+    let crossposts = 0
+    const channel = {
+      id: channelId,
+      type: ChannelType.GuildAnnouncement,
+      permissionsFor: () => ({ has: () => true }),
+      send: async (body) => body,
+      crosspost: async () => { crossposts += 1 },
+    }
+    const setup = mockInteraction({
+      commandName: 'setup',
+      permissions: [PermissionFlagsBits.ManageGuild],
+      options: { channel, autodelete: true, commandsonly: true },
+    })
+    await app.handleInteraction(setup.interaction)
+    assert.equal(config.get().guilds['111111111111111111'].requestChannelId, channelId)
+    assert.equal(config.get().guilds['111111111111111111'].requestCommandsOnly, true)
+    assert.equal(shown.length, 1)
+    assert.equal(shown[0].channel.id, channelId)
+    assert.ok(shown[0].body.embeds)
+    assert.equal(crossposts, 0)
+
+    let deleted = false
+    await app.handleMessage({
+      guildId: '111111111111111111',
+      channelId,
+      author: { id: '333333333333333333', bot: false, username: 'ada' },
+      member: {
+        voice: { channel: { id: '444444444444444444', type: ChannelType.GuildVoice, permissionsFor: () => ({ has: () => true }) } },
+        permissions: { has: () => false },
+        roles: { cache: { has: () => false } },
+      },
+      content: 'hello song',
+      guild: { members: { me: { id: 'bot' } } },
+      channel,
+      delete: async () => { deleted = true },
+    })
+    assert.equal(music.calls.at(-1)[0], 'play')
+    assert.equal(deleted, true)
+    assert.equal(shown.length, 2)
+    assert.equal(crossposts, 0)
+
+    const here = mockInteraction({
+      commandName: 'play',
+      channelId,
+      options: { query: 'song' },
+      botChannelId: null,
+    })
+    await app.handleInteraction(here.interaction)
+    assert.equal(here.replies.some((entry) => /request channel/.test(entry.payload?.content ?? '')), false)
+
+    const elsewhere = mockInteraction({
+      commandName: 'play',
+      channelId: '666666666666666666',
+      options: { query: 'song' },
+      botChannelId: null,
+    })
+    await app.handleInteraction(elsewhere.interaction)
+    assert.match(elsewhere.replies[0].payload.content, /request channel/)
+
+    const toggle = mockInteraction({
+      commandName: 'texttoggle',
+      permissions: [PermissionFlagsBits.ManageGuild],
+      options: { channel },
+    })
+    await app.handleInteraction(toggle.interaction)
+    assert.deepEqual(config.get().guilds['111111111111111111'].textChannels, [channelId])
+
+    const before = music.calls.length
+    await app.handleMessage({
+      guildId: '111111111111111111',
+      channelId,
+      author: { id: '333333333333333333', bot: false, username: 'ada' },
+      member: { voice: { channel: { id: '444444444444444444', type: ChannelType.GuildVoice } } },
+      content: 'thread song',
+      guild: { members: { me: { id: 'bot' } } },
+      channel: { id: channelId, type: ChannelType.AnnouncementThread, crosspost: async () => { crossposts += 1 } },
+      delete: async () => { throw new Error('should not delete a thread') },
+    })
+    assert.equal(music.calls.length, before)
+    assert.equal(crossposts, 0)
+
+    for (const type of [ChannelType.GuildForum, ChannelType.PublicThread, ChannelType.GuildVoice]) {
+      const rejected = mockInteraction({
+        commandName: 'texttoggle',
+        permissions: [PermissionFlagsBits.ManageGuild],
+        options: { channel: { id: '888888888888888888', type } },
+      })
+      await app.handleInteraction(rejected.interaction)
+      assert.match(rejected.replies.at(-1).payload.content, /not supported/, String(type))
+    }
+    assert.deepEqual(config.get().guilds['111111111111111111'].textChannels, [channelId])
+
+    const forum = mockInteraction({
+      commandName: 'setup',
+      permissions: [PermissionFlagsBits.ManageGuild],
+      options: { channel: { id: '888888888888888888', type: ChannelType.GuildForum } },
+    })
+    await app.handleInteraction(forum.interaction)
+    assert.match(forum.replies.at(-1).payload.content, /not supported/)
+    assert.equal(config.get().guilds['111111111111111111'].requestChannelId, channelId)
   })
 })

@@ -1,11 +1,14 @@
+import { readFileSync, writeFileSync } from 'node:fs'
 import { describe, test } from 'node:test'
+import { fileURLToPath } from 'node:url'
 import assert from 'node:assert/strict'
 import { PermissionFlagsBits } from 'discord.js'
+import { createConfigStore, loadSchema } from '../src/config.js'
 import { createApp } from '../src/handlers.js'
 import { resolveTracks } from '../src/resolve.js'
 import { createPlaylistStore } from '../src/playlists.js'
+import { silentLogger, tempDir } from './helpers.js'
 import { baseConfig, memoryConfig, mockInteraction, stubMusic } from './mock.js'
-import { tempDir } from './helpers.js'
 
 const guild = '111111111111111111'
 
@@ -164,7 +167,7 @@ describe('command routing', () => {
       },
       {
         commandName: 'texttoggle',
-        options: { channel: { id: '222222222222222222' } },
+        options: { channel: { id: '222222222222222222', type: 0 } },
         permissions: manage,
         reply: /allowed/,
       },
@@ -217,6 +220,14 @@ describe('command routing', () => {
         if (item.reply) assert.match(text(replies), item.reply, item.commandName)
       }
       assert.equal(config.get().guilds[guild].djOnly.includes('skip'), true)
+      const playfile = mockInteraction({
+        commandName: 'setdjonly',
+        options: { command: 'playfile', enabled: true },
+        permissions: manage,
+      })
+      await app.handleInteraction(playfile.interaction)
+      assert.match(text(playfile.replies), /playfile/)
+      assert.equal(config.get().guilds[guild].djOnly.includes('playfile'), true)
       assert.deepEqual(config.get().guilds[guild].textChannels, ['222222222222222222'])
       assert.deepEqual(config.get().guilds[guild].voiceChannels, ['444444444444444444'])
       assert.equal(config.get().guilds[guild].defaultVolume, 15)
@@ -348,5 +359,36 @@ describe('command routing', () => {
     await app.handleInteraction(quiet.interaction)
     assert.match(text(quiet.replies), /I need Speak in <#444444444444444444>/)
     assert.equal(music.calls.length, 0)
+  })
+
+  test('/setdjonly command:playfile saves', async () => {
+    const dir = tempDir()
+    const filePath = dir.path('config.json')
+    writeFileSync(filePath, readFileSync(new URL('../config.example.json', import.meta.url)))
+    const config = createConfigStore({
+      filePath,
+      schema: loadSchema(fileURLToPath(new URL('../config.schema.json', import.meta.url))),
+      logger: silentLogger,
+      watch: false,
+    })
+    const app = createApp({
+      config,
+      music: stubMusic(),
+      requestChannel: false,
+      now: () => 1_000,
+    })
+    const command = mockInteraction({
+      commandName: 'setdjonly',
+      options: { command: 'playfile', enabled: true },
+      permissions: [PermissionFlagsBits.ManageGuild],
+    })
+    try {
+      await app.handleInteraction(command.interaction)
+      assert.match(text(command.replies), /\/playfile now requires the DJ role/)
+      assert.equal(config.get().guilds[guild].djOnly.includes('playfile'), true)
+    } finally {
+      config.close()
+      dir.remove()
+    }
   })
 })

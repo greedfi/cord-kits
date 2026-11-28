@@ -1,4 +1,5 @@
 import { ChannelType, PermissionFlagsBits, SlashCommandBuilder } from 'discord.js'
+import { TEXT_CHANNEL_TYPES } from './channels.js'
 import { CONTROL_COMMANDS, LOOP_MODES } from './catalog.js'
 
 const connect = PermissionFlagsBits.Connect
@@ -150,7 +151,7 @@ export const commands = [
       .setName('channel')
       .setDescription('Channel where members type song names')
       .setRequired(true)
-      .addChannelTypes(ChannelType.GuildText))
+      .addChannelTypes(...TEXT_CHANNEL_TYPES))
     .addBooleanOption((option) => option.setName('autodelete').setDescription('Delete request messages').setRequired(false))
     .addBooleanOption((option) => option.setName('commandsonly').setDescription('Allow music commands only in that channel').setRequired(false)),
   command('setdj', 'Set the DJ role.', manage)
@@ -168,7 +169,7 @@ export const commands = [
       .setName('channel')
       .setDescription('Text channel')
       .setRequired(true)
-      .addChannelTypes(ChannelType.GuildText)),
+      .addChannelTypes(...TEXT_CHANNEL_TYPES)),
   command('voicetoggle', 'Allow or block a voice channel.', manage)
     .addChannelOption((option) => option
       .setName('channel')

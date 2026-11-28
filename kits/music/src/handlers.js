@@ -12,6 +12,7 @@ import { nowPlayingPayload, SAFE_MENTIONS, searchMenu } from './nowplaying.js'
 import { formatQueue, parseClock, safeLabel } from './queue.js'
 import { resolveTracks as defaultResolveTracks } from './resolve.js'
 import { guildSettings, waitingLimit } from './settings.js'
+import { isGuildMessageChannel } from './channels.js'
 import { SourceError } from './sources.js'
 
 const SEARCH_TTL_MS = 5 * 60 * 1000
@@ -501,6 +502,10 @@ export function createApp(deps) {
     }
     if (commandName === 'texttoggle' || commandName === 'voicetoggle') {
       const channel = interaction.options.getChannel('channel', true)
+      if (commandName === 'texttoggle' && !isGuildMessageChannel(channel)) {
+        await finish(interaction, 'Choose a text or announcement channel. Threads, forums, and voice chats are not supported.')
+        return
+      }
       const key = commandName === 'texttoggle' ? 'textChannels' : 'voiceChannels'
       const current = settings[key]
       const next = current.includes(channel.id)
@@ -579,6 +584,12 @@ export function createApp(deps) {
     }
     if (!interaction.deferred && !interaction.replied) await interaction.deferReply({ flags: MessageFlags.Ephemeral })
     const channel = interaction.options.getChannel('channel', true)
+    if (!isGuildMessageChannel(channel)) {
+      await present(interaction, {
+        content: 'Choose a text or announcement channel. Threads, forums, and voice chats are not supported.',
+      })
+      return
+    }
     const me = interaction.guild.members.me
     const permissions = channel.permissionsFor?.(me)
     if (
@@ -767,6 +778,7 @@ export function createApp(deps) {
     if (!message.guildId || message.author?.bot) return
     const settings = settingsFor(message.guildId)
     if (!settings.requestChannelId || message.channelId !== settings.requestChannelId) return
+    if (!isGuildMessageChannel(message.channel)) return
     const content = String(message.content ?? '').trim()
     if (!content || content.startsWith('/')) return
     const denial = authorize({
